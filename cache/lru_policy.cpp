@@ -1,4 +1,4 @@
-#include "lru_policy.h"
+#include "lru_policy.hpp"
 #include <iostream>
 #include <iomanip>
 

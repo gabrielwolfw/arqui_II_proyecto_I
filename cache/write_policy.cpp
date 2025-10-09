@@ -1,4 +1,4 @@
-#include "write_policy.h"
+#include "write_policy.hpp"
 
 WritePolicy::WritePolicy(WriteHitPolicy hit, WriteMissPolicy miss)
     : hit_policy(hit), miss_policy(miss) {}

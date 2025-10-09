@@ -1,5 +1,6 @@
-#include "cache.h"
+#include "cache.hpp"
 #include <iostream>
+#include <cassert>
 
 int main() {
     // Crear una caché para PE0
@@ -31,6 +32,19 @@ int main() {
     // Imprimir estado
     cache.printCache();
     cache.printStats();
+
+    
+    CacheStats stats = cache.getStats();
+    std::cout << "Read Hits: " << stats.read_hits << std::endl;
+    std::cout << "Read Misses: " << stats.read_misses << std::endl;
+    std::cout << "Write Hits: " << stats.write_hits << std::endl;
+    std::cout << "Write Misses: " << stats.write_misses << std::endl;
+
+    assert(stats.read_hits == 1);
+    assert(stats.read_misses == 2);
+    assert(stats.write_hits == 1);
+    assert(stats.write_misses == 1);
+    std::cout << "All assertions passed!" << std::endl;
     
     return 0;
 }

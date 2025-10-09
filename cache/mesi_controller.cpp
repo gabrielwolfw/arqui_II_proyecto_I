@@ -1,4 +1,4 @@
-#include "mesi_controller.h"
+#include "mesi_controller.hpp"
 #include <iostream>
 
 MESIController::MESIController(int pe_id) : pe_id(pe_id), transition_count(0) {}

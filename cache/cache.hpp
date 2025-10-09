@@ -4,9 +4,9 @@
 #include <cstdint>
 #include <array>
 #include <memory>
-#include "lru_policy.h"
-#include "mesi_controller.h"
-#include "write_policy.h"
+#include "lru_policy.hpp"
+#include "mesi_controller.hpp"
+#include "write_policy.hpp"
 
 // Constantes de configuración
 constexpr size_t CACHE_BLOCK_SIZE = 32;
