@@ -7,6 +7,7 @@
 #include "lru_policy.hpp"
 #include "mesi_controller.hpp"
 #include "write_policy.hpp"
+#include "bus_interface.hpp"  // Solo la interfaz abstracta
 
 // Constantes de configuración
 constexpr size_t CACHE_BLOCK_SIZE = 32;
@@ -16,7 +17,14 @@ constexpr size_t OFFSET_BITS = 5;
 constexpr size_t INDEX_BITS = 3;
 constexpr size_t TAG_BITS = 52;
 
-// Estructura de una línea de caché (simplificada)
+// Mensaje para el bus
+struct BusMessage {
+    uint64_t address;
+    BusEvent event;
+    int sender_pe_id;
+};
+
+// Estructura de una línea de caché
 struct CacheLine {
     bool valid;
     bool dirty;
@@ -37,7 +45,6 @@ struct CacheSet {
     
     CacheSet() : lru(std::make_unique<LRUPolicy>(CACHE_WAYS)) {}
     
-    // Copy constructor y assignment para manejar unique_ptr
     CacheSet(const CacheSet& other) 
         : ways(other.ways),
           lru(std::make_unique<LRUPolicy>(CACHE_WAYS)) {
@@ -91,7 +98,8 @@ private:
     std::unique_ptr<MESIController> mesi_controller;
     std::unique_ptr<WritePolicy> write_policy;
     
-    class Interconnect* interconnect;
+    // Interfaz de bus (puede ser nullptr para pruebas standalone)
+    IBusInterface* bus_interface;
     
     // Métodos auxiliares
     int findWay(uint8_t index, uint64_t tag);
@@ -106,13 +114,15 @@ public:
     bool read(uint64_t address, uint64_t& data);
     bool write(uint64_t address, uint64_t data);
     
-    // Protocolo MESI (llamadas del bus)
+    // Protocolo MESI - Reacciones a mensajes del bus
     void handleBusRead(uint64_t address);
     void handleBusReadX(uint64_t address);
     void invalidateLine(uint64_t address);
     
+    // Configuración de bus (opcional)
+    void setBusInterface(IBusInterface* bus) { bus_interface = bus; }
+    
     // Utilidades
-    void setInterconnect(Interconnect* ic) { interconnect = ic; }
     CacheStats getStats() const { return stats; }
     void printCache() const;
     void printStats() const;

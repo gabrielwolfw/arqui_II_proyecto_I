@@ -16,8 +16,8 @@ enum class MESIState : uint8_t {
 enum class BusEvent {
     LOCAL_READ,      // Lectura local
     LOCAL_WRITE,     // Escritura local
-    BUS_READ,        // Otro PE quiere leer
-    BUS_READX,       // Otro PE quiere escribir
+    BUS_READ,        // Otro PE quiere leer (caché miss de lectura)
+    BUS_READX,       // Otro PE quiere escribir (caché miss de escritura)
     BUS_UPGRADE,     // Upgrade de S a M
     EVICTION         // Desalojo de línea
 };
@@ -25,18 +25,18 @@ enum class BusEvent {
 // Resultado de una transición MESI
 struct MESIResult {
     MESIState new_state;
-    bool needs_bus_transaction;  // ¿Necesita transacción en el bus?
-    bool needs_writeback;        // ¿Necesita writeback?
-    bool needs_invalidate;       // ¿Necesita invalidar?
-    bool needs_data_from_memory; // ¿Necesita traer dato de memoria?
-    bool needs_data_from_cache;  // ¿Necesita dato de otra caché?
+    bool needs_bus_message;      // ¿Necesita enviar mensaje al bus?
+    bool needs_writeback;        // ¿Necesita hacer writeback a memoria?
+    bool needs_invalidate;       // ¿Necesita invalidar la línea?
+    bool supply_data;            // ¿Debe proveer el dato directamente por interconnect?
+    bool fetch_from_memory;      // ¿Debe buscar el dato en memoria?
     
     MESIResult() : new_state(MESIState::INVALID), 
-                   needs_bus_transaction(false),
+                   needs_bus_message(false),
                    needs_writeback(false),
                    needs_invalidate(false),
-                   needs_data_from_memory(false),
-                   needs_data_from_cache(false) {}
+                   supply_data(false),
+                   fetch_from_memory(false) {}
 };
 
 class MESIController {

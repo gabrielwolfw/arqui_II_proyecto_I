@@ -38,23 +38,24 @@ MESIResult MESIController::handleInvalidState(BusEvent event) {
     
     switch (event) {
         case BusEvent::LOCAL_READ:
-            // I -> E o I -> S dependiendo si otros tienen copia
-            result.new_state = MESIState::EXCLUSIVE;  // Asumimos E, bus lo ajustará a S si necesario
-            result.needs_bus_transaction = true;
-            result.needs_data_from_memory = true;
+            // I -> E o I -> S (depende de respuesta de otros PEs)
+            // Enviamos BUS_READ y esperamos respuesta
+            result.new_state = MESIState::EXCLUSIVE;  // Asumimos E, se ajustará a S si otro responde
+            result.needs_bus_message = true;          // Enviar BUS_READ por interconnect
+            result.fetch_from_memory = true;          // Siempre va a memoria (puede ser interceptado)
             break;
             
         case BusEvent::LOCAL_WRITE:
             // I -> M
             result.new_state = MESIState::MODIFIED;
-            result.needs_bus_transaction = true;
-            result.needs_data_from_memory = true;
+            result.needs_bus_message = true;          // Enviar BUS_READX para invalidar otros
+            result.fetch_from_memory = true;          // Va a memoria por el bloque
             break;
             
         case BusEvent::BUS_READ:
         case BusEvent::BUS_READX:
         case BusEvent::BUS_UPGRADE:
-            // Permanece en I, no hace nada
+            // Permanece en I, no hace nada (no tiene el dato)
             result.new_state = MESIState::INVALID;
             break;
             
@@ -80,23 +81,23 @@ MESIResult MESIController::handleSharedState(BusEvent event) {
         case BusEvent::LOCAL_WRITE:
             // S -> M (debe invalidar otras copias)
             result.new_state = MESIState::MODIFIED;
-            result.needs_bus_transaction = true;  // BusUpgrade
+            result.needs_bus_message = true;  // Enviar BUS_UPGRADE
             break;
             
         case BusEvent::BUS_READ:
-            // S -> S (otro también lee)
+            // S -> S (otro también lee, permanecemos en S)
             result.new_state = MESIState::SHARED;
-            result.needs_data_from_cache = true;  // Puede proveer dato
+            result.supply_data = true;  // Podemos proveer el dato si se requiere
             break;
             
         case BusEvent::BUS_READX:
-            // S -> I (otro quiere escribir)
+            // S -> I (otro quiere escribir, nos invalidan)
             result.new_state = MESIState::INVALID;
             result.needs_invalidate = true;
             break;
             
         case BusEvent::BUS_UPGRADE:
-            // S -> I (otro hace upgrade)
+            // S -> I (otro hace upgrade de S a M)
             result.new_state = MESIState::INVALID;
             result.needs_invalidate = true;
             break;
@@ -121,21 +122,21 @@ MESIResult MESIController::handleExclusiveState(BusEvent event) {
             break;
             
         case BusEvent::LOCAL_WRITE:
-            // E -> M (escritura silenciosa, sin bus transaction)
+            // E -> M (escritura silenciosa, sin bus message)
             result.new_state = MESIState::MODIFIED;
             break;
             
         case BusEvent::BUS_READ:
-            // E -> S (otro quiere leer, compartimos)
+            // E -> S (otro quiere leer, le pasamos el dato directamente)
             result.new_state = MESIState::SHARED;
-            result.needs_data_from_cache = true;
+            result.supply_data = true;  // Le pasamos el dato por interconnect
             break;
             
         case BusEvent::BUS_READX:
             // E -> I (otro quiere escribir)
             result.new_state = MESIState::INVALID;
             result.needs_invalidate = true;
-            result.needs_data_from_cache = true;
+            result.supply_data = true;  // Le pasamos el dato antes de invalidar
             break;
             
         case BusEvent::BUS_UPGRADE:
@@ -144,7 +145,7 @@ MESIResult MESIController::handleExclusiveState(BusEvent event) {
             break;
             
         case BusEvent::EVICTION:
-            // E -> I (evicción limpia)
+            // E -> I (evicción limpia, no hay escrituras)
             result.new_state = MESIState::INVALID;
             break;
     }
@@ -168,22 +169,25 @@ MESIResult MESIController::handleModifiedState(BusEvent event) {
             break;
             
         case BusEvent::BUS_READ:
-            // M -> S (otro quiere leer, hacemos writeback y compartimos)
+            // M -> S (otro quiere leer)
+            // Debemos hacer writeback primero para actualizar memoria
+            // Luego el PE solicitante va a memoria
             result.new_state = MESIState::SHARED;
-            result.needs_writeback = true;
-            result.needs_data_from_cache = true;
+            result.needs_writeback = true;  // Actualizar memoria
+            result.supply_data = false;      // NO le pasamos directamente, va a memoria
             break;
             
         case BusEvent::BUS_READX:
-            // M -> I (otro quiere escribir, hacemos writeback)
+            // M -> I (otro quiere escribir)
+            // Hacemos writeback primero, luego invalidamos
             result.new_state = MESIState::INVALID;
-            result.needs_writeback = true;
+            result.needs_writeback = true;   // Actualizar memoria primero
             result.needs_invalidate = true;
-            result.needs_data_from_cache = true;
+            result.supply_data = false;      // El otro PE va a memoria después del writeback
             break;
             
         case BusEvent::BUS_UPGRADE:
-            // No aplica desde M
+            // No aplica desde M (nadie más puede tener copia)
             result.new_state = MESIState::MODIFIED;
             break;
             
