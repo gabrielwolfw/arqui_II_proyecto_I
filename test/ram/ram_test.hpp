@@ -1,17 +1,30 @@
 #ifndef RAM_TEST_HPP
 #define RAM_TEST_HPP
 
-#include "../src/ram/ram.hpp"
-#include <cassert>
+#include "../../src/ram/ram.hpp"
+#include <iostream>
+#include <cstdint>
 
 class RAMTest {
 public:
-    /**
-     * @brief Run all RAM tests
-     * @param verbose Enable verbose output
-     * @return true if all tests pass, false otherwise
-     */
-    static bool runTests(bool verbose = false);
+    static bool runAllTests() {
+        bool success = true;
+        RAM ram(true);  // Create RAM with verbose output
+
+        std::cout << "\nStarting RAM tests...\n";
+
+        success &= testWriteRead(ram);
+        success &= testInvalidAddress(ram);
+        success &= testBoundaryValues(ram);
+
+        if (success) {
+            std::cout << "All RAM tests passed!\n";
+        } else {
+            std::cout << "Some RAM tests failed!\n";
+        }
+
+        return success;
+    }
 
 private:
     static bool testWriteRead(RAM& ram);

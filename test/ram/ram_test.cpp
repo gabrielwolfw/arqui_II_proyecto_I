@@ -1,72 +1,87 @@
 #include "ram_test.hpp"
-#include <iostream>
-#include <limits>
-
-bool RAMTest::runTests(bool verbose) {
-    RAM ram(verbose);
-    bool success = true;
-
-    std::cout << "Running RAM tests..." << std::endl;
-
-    success &= testWriteRead(ram);
-    success &= testInvalidAddress(ram);
-    success &= testBoundaryValues(ram);
-
-    if (success) {
-        std::cout << "All tests passed!" << std::endl;
-    } else {
-        std::cout << "Some tests failed!" << std::endl;
-    }
-
-    return success;
-}
+#include <cassert>
 
 bool RAMTest::testWriteRead(RAM& ram) {
-    std::cout << "Testing basic write/read operations..." << std::endl;
-    
+    std::cout << "Testing write and read operations...\n";
     bool success = true;
-    ram.clear();
-
-    // Test some regular values
-    double testValue = 123.456;
-    uint16_t testAddr = 0x0100;
-
-    success &= ram.write(testAddr, testValue);
-    testValue = 493.4551;
-    testAddr = 0x0100;
-
-    success &= ram.write(testAddr, testValue);
-    bool readSuccess;
-    double readValue = ram.read(testAddr, &readSuccess);
     
-    success &= readSuccess;
-    success &= (readValue == testValue);
-
+    // Test basic write/read operations
+    uint32_t testAddr = 0x0100;
+    uint64_t testValue = 0xCAFEBABE;
+    
+    try {
+        // Reset memory to known state
+        ram.write(testAddr, 0);
+        
+        // Write test value
+        ram.write(testAddr, testValue);
+        
+        // Read and verify
+        uint64_t readValue = ram.read(testAddr);
+        success &= (readValue == testValue);
+        
+        if (success) {
+            std::cout << "Write/Read test passed!\n";
+        } else {
+            std::cout << "Write/Read test failed! Expected: " << testValue 
+                      << ", Got: " << readValue << "\n";
+        }
+    } catch (const std::exception& e) {
+        std::cout << "Write/Read test failed with exception: " << e.what() << "\n";
+        success = false;
+    }
+    
     return success;
 }
 
 bool RAMTest::testInvalidAddress(RAM& ram) {
-    std::cout << "Testing invalid addresses..." << std::endl;
-    
+    std::cout << "Testing invalid address handling...\n";
     bool success = true;
     
-    // Test address outside valid range
-    success &= !ram.write(0x0200, 1.0);  // Should fail
-    bool readSuccess;
-    ram.read(0x0200, &readSuccess);
-    success &= !readSuccess;  // Should fail
-
+    try {
+        // Try to write to invalid address
+        ram.write(RAM::MAX_ADDRESS + 1, 1);
+        std::cout << "Invalid address test failed: Should have thrown exception\n";
+        success = false;
+    } catch (const std::out_of_range&) {
+        std::cout << "Invalid address write correctly rejected\n";
+    }
+    
+    try {
+        // Try to read from invalid address
+        ram.read(RAM::MAX_ADDRESS + 1);
+        std::cout << "Invalid address test failed: Should have thrown exception\n";
+        success = false;
+    } catch (const std::out_of_range&) {
+        std::cout << "Invalid address read correctly rejected\n";
+    }
+    
     return success;
 }
 
 bool RAMTest::testBoundaryValues(RAM& ram) {
-    std::cout << "Testing boundary values..." << std::endl;
-    
+    std::cout << "Testing boundary values...\n";
     bool success = true;
+    uint64_t testValue = 0xDEADBEEF;
     
-    // Test minimum and maximum valid addresses
-    success &= ram.write(0x0000, 1.0);  // First address
-    success &= ram.write(0x01FF, 1.0);  // Last address
-
+    try {
+        // Test first address
+        ram.write(0x0000, testValue);
+        success &= (ram.read(0x0000) == testValue);
+        
+        // Test last valid address
+        ram.write(RAM::MAX_ADDRESS, testValue);
+        success &= (ram.read(RAM::MAX_ADDRESS) == testValue);
+        
+        if (success) {
+            std::cout << "Boundary values test passed!\n";
+        } else {
+            std::cout << "Boundary values test failed!\n";
+        }
+    } catch (const std::exception& e) {
+        std::cout << "Boundary values test failed with exception: " << e.what() << "\n";
+        success = false;
+    }
+    
     return success;
 }

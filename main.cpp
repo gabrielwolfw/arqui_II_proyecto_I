@@ -1,17 +1,22 @@
-#include "test/ram_test.hpp"
-#include <string>
-#include <cstring>
+#include <iostream>
+#include "src/interconnect/interconnect.hpp"
+#include "src/ram/ram.hpp"
 
-int main(int argc, char* argv[]) {
-    bool verbose = false;
+// Forward declarations of test functions
+void test_round_robin();
+void test_memory_operations();
 
-    // Parse command line arguments
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "-v") == 0) {
-            verbose = true;
-            break;
-        }
+int main() {
+    std::cout << "Starting Interconnect Tests..." << std::endl;
+    
+    try {
+        test_round_robin();
+        test_memory_operations();
+        std::cout << "All tests passed successfully!" << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "Test failed with error: " << e.what() << std::endl;
+        return 1;
     }
-
-    return RAMTest::runTests(verbose) ? 0 : 1;
+    
+    return 0;
 }

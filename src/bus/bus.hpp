@@ -1,37 +1,33 @@
 #ifndef BUS_HPP
 #define BUS_HPP
 
+#include <cstdint>
 #include <string>
-#include <vector>
 
-// Tipos de transacciones soportadas por el bus
-enum class BusOpType {
-    BusRd,   // Lectura compartida de un bloque
-    BusRdX,  // Lectura con intención de modificar (lectura exclusiva)
-    BusUpgr, // Solicitud para pasar de S → M sin recargar el bloque
-    BusWB    // Escritura a memoria (cuando un bloque M se reemplaza)
+enum class BusTransactionType {
+    BusRd,    // Shared read of a block
+    BusRdX,   // Read with intention to modify (exclusive read)
+    BusUpgr,  // Request to transition from S → M without reloading block
+    BusWB     // Write back to memory (when M block is replaced)
 };
 
-// Estructura para representar una transacción en el bus
 struct BusTransaction {
-    unsigned int address;     // Dirección del bloque
-    unsigned int pe_id;      // Identificador del PE emisor
-    BusOpType op_type;       // Tipo de operación
-    bool processed;          // Flag para indicar si la transacción fue procesada
+    BusTransactionType type;
+    uint32_t address;      // Block address
+    uint32_t pe_id;       // Processing Element ID
+    uint32_t data;        // Data for write operations
     
-    BusTransaction(unsigned int addr, unsigned int id, BusOpType op) :
-        address(addr), pe_id(id), op_type(op), processed(false) {}
-};
-
-// Lista de transacciones del bus
-class BusList {
-private:
-    std::vector<BusTransaction> transactions;
-
-public:
-    void addTransaction(const BusTransaction& trans);
-    std::vector<BusTransaction>& getTransactions() { return transactions; }
-    const std::vector<BusTransaction>& getTransactions() const { return transactions; }
+    std::string toString() const {
+        std::string typeStr;
+        switch(type) {
+            case BusTransactionType::BusRd: typeStr = "BusRd"; break;
+            case BusTransactionType::BusRdX: typeStr = "BusRdX"; break;
+            case BusTransactionType::BusUpgr: typeStr = "BusUpgr"; break;
+            case BusTransactionType::BusWB: typeStr = "BusWB"; break;
+        }
+        return "PE" + std::to_string(pe_id) + " - " + typeStr + 
+               " @ 0x" + std::to_string(address);
+    }
 };
 
 #endif // BUS_HPP
