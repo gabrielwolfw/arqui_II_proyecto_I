@@ -1,34 +1,33 @@
+# Carpetas
+BIN_DIR = ../../bin
+BUILD_DIR = ../../build/cache
+
+# Archivos fuente
+SRCS = cache.cpp interconnect.cpp lru_policy.cpp mesi_controller.cpp write_policy.cpp main.cpp
+HDRS = cache.hpp interconnect.hpp lru_policy.hpp mesi_controller.hpp write_policy.hpp bus_interface.hpp
+OBJS = $(SRCS:%.cpp=$(BUILD_DIR)/%.o)
+
+# Nombre del ejecutable
+TARGET = $(BIN_DIR)/cache_simulator
+
+# Compilador y flags
 CXX = g++
-CXXFLAGS = -std=c++17 -Wall -Wextra -g
+CXXFLAGS = -Wall -I. # -I. para incluir los headers locales
 
-OBJS = lru_policy.o write_policy.o mesi_controller.o cache.o interconnect.o main.o
+# Regla por defecto
+all: $(TARGET)
 
-all: cache_simulator
+# Regla para crear el binario
+$(TARGET): $(OBJS)
+	$(CXX) $(CXXFLAGS) $^ -o $@
 
-cache_simulator: $(OBJS)
-	$(CXX) $(CXXFLAGS) -o $@ $(OBJS)
+# Regla para compilar archivos objeto en build/cache/
+$(BUILD_DIR)/%.o: %.cpp $(HDRS)
+	@mkdir -p $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-lru_policy.o: lru_policy.cpp lru_policy.hpp
-	$(CXX) $(CXXFLAGS) -c lru_policy.cpp
-
-write_policy.o: write_policy.cpp write_policy.hpp
-	$(CXX) $(CXXFLAGS) -c write_policy.cpp
-
-mesi_controller.o: mesi_controller.cpp mesi_controller.hpp
-	$(CXX) $(CXXFLAGS) -c mesi_controller.cpp
-
-cache.o: cache.cpp cache.hpp mesi_controller.hpp write_policy.hpp lru_policy.hpp
-	$(CXX) $(CXXFLAGS) -c cache.cpp
-
-interconnect.o: interconnect.cpp interconnect.hpp cache.hpp
-	$(CXX) $(CXXFLAGS) -c interconnect.cpp
-
-main.o: main.cpp cache.hpp interconnect.hpp
-	$(CXX) $(CXXFLAGS) -c main.cpp
-
+# Limpiar objetos y binario
 clean:
-	rm -f *.o cache_simulator
+	rm -rf $(BUILD_DIR)/*.o $(TARGET)
 
-run: cache_simulator
-	./cache_simulator
 .PHONY: all clean
