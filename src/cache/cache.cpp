@@ -38,6 +38,7 @@ void Cache::writebackLine(uint8_t index, int way) {
     CacheLine& line = cache_sets[index].ways[way];
     
     if (line.dirty && line.valid) {
+        // Reconstruir dirección base del bloque completo
         uint64_t address = (line.tag << (OFFSET_BITS + INDEX_BITS)) | 
                           (index << OFFSET_BITS);
         
@@ -59,14 +60,17 @@ void Cache::writebackLine(uint8_t index, int way) {
 }
 
 bool Cache::fetchBlock(uint64_t address, uint8_t* data) {
+    // IMPORTANTE: Alinear la dirección al inicio del bloque de cache
+    uint64_t block_address = (address / CACHE_BLOCK_SIZE) * CACHE_BLOCK_SIZE;
+    
     // Fetch desde memoria a través del bus interface
     if (bus_interface != nullptr) {
-        bus_interface->readFromMemory(address, data, CACHE_BLOCK_SIZE);
+        bus_interface->readFromMemory(block_address, data, CACHE_BLOCK_SIZE);
     } else {
         // Modo standalone: simula lectura con datos dummy
         std::memset(data, 0xAB, CACHE_BLOCK_SIZE);
         std::cout << "[PE" << pe_id << "] Fetching block (standalone mode): addr=0x" 
-                  << std::hex << address << std::dec << std::endl;
+                  << std::hex << block_address << std::dec << std::endl;
     }
     
     return true;
