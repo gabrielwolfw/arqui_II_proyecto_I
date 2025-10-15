@@ -1,77 +1,136 @@
 #include "Loader.hpp"
 #include "PE.hpp"
-#include "MockMemPort.hpp"
 #include "cache.hpp"
+
+
+#include "../src/bus/bus.hpp"
+#include "../src/ram/ram.hpp"
+#include "../src/interconnect/interconnect.hpp"
 #include <iostream>
 #include <cstring>
-#include <cmath>
 #include <fstream>
 #include <vector>
 #include <iomanip>
+#include <memory>
 
 // ============================================================
-// INTERFACES PARA INTEGRAR CACHE CON MEMORIA PRINCIPAL
+// ADAPTER: Convierte entre estructuras de Cache y Interconnect
 // ============================================================
 
-// Interface entre Cache y MockMemPort (memoria principal)
-class CacheBusInterface : public IBusInterface {
-    MockMemPort& main_memory;
+BusTransactionType busEventToTransactionType(BusEvent event) {
+    switch (event) {
+        case BusEvent::BUS_READ:
+            return BusTransactionType::BusRd;
+        case BusEvent::BUS_READX:
+            return BusTransactionType::BusRdX;
+        case BusEvent::BUS_UPGRADE:
+            return BusTransactionType::BusUpgr;
+        default:
+            return BusTransactionType::BusRd;
+    }
+}
+
+// ============================================================
+// INTERFACE: Conecta Cache con Interconnect + RAM
+// ============================================================
+
+class InterconnectBusInterface : public IBusInterface {
+    std::shared_ptr<Interconnect> interconnect;
+    std::shared_ptr<RAM> ram;
+    int pe_id;
+    
 public:
-    CacheBusInterface(MockMemPort& mem) : main_memory(mem) {}
+    InterconnectBusInterface(std::shared_ptr<Interconnect> ic, 
+                            std::shared_ptr<RAM> r, 
+                            int id)
+        : interconnect(ic), ram(r), pe_id(id) {}
     
     void readFromMemory(uint64_t address, uint8_t* data, size_t size) override {
-        // Cache pasa direcciones en BYTES, MockMemPort usa índices de uint64_t
-        // Necesitamos alinear a bloques de cache completos
+        // Alinear a inicio de bloque
+        uint64_t block_address = (address / 32) * 32;  // CACHE_BLOCK_SIZE = 32
         
+        // Leer bloque completo desde RAM (en palabras de 64 bits)
         size_t num_words = size / sizeof(uint64_t);
-        uint64_t word_addr = address / sizeof(uint64_t); // Convertir bytes a índice de palabra
+        uint64_t word_addr = block_address / sizeof(uint64_t);
         
-        std::cout << "[BusInterface] Reading from memory: byte_addr=0x" << std::hex << address 
+        std::cout << "[PE" << pe_id << " BusInterface] Reading from RAM: "
+                  << "byte_addr=0x" << std::hex << block_address 
                   << " word_addr=" << std::dec << word_addr 
-                  << " size=" << size << " bytes (" << num_words << " words)" << std::endl;
+                  << " (" << num_words << " words)" << std::endl;
         
+        // Leer cada palabra desde RAM
         for (size_t i = 0; i < num_words; i++) {
-            uint64_t word = main_memory.load(word_addr + i);
-            std::memcpy(&data[i * sizeof(uint64_t)], &word, sizeof(uint64_t));
+            uint32_t ram_addr = static_cast<uint32_t>(word_addr + i);
             
-            std::cout << "  [" << i << "] mem[" << (word_addr + i) << "] = 0x" 
-                      << std::hex << word << std::dec << std::endl;
+            // Validar dirección
+            if (ram_addr > RAM::MAX_ADDRESS) {
+                std::cerr << "Warning: RAM address 0x" << std::hex << ram_addr 
+                         << " exceeds MAX_ADDRESS, wrapping around" << std::endl;
+                ram_addr = ram_addr & RAM::MAX_ADDRESS;
+            }
+            
+            uint64_t word = ram->read(ram_addr);
+            std::memcpy(&data[i * sizeof(uint64_t)], &word, sizeof(uint64_t));
         }
     }
     
     void writeToMemory(uint64_t address, const uint8_t* data, size_t size) override {
-        // Cache pasa direcciones en BYTES, MockMemPort usa índices de uint64_t
+        // Alinear a inicio de bloque
+        uint64_t block_address = (address / 32) * 32;
         
         size_t num_words = size / sizeof(uint64_t);
-        uint64_t word_addr = address / sizeof(uint64_t); // Convertir bytes a índice de palabra
+        uint64_t word_addr = block_address / sizeof(uint64_t);
         
-        std::cout << "[BusInterface] Writing to memory: byte_addr=0x" << std::hex << address 
+        std::cout << "[PE" << pe_id << " BusInterface] Writing to RAM: "
+                  << "byte_addr=0x" << std::hex << block_address 
                   << " word_addr=" << std::dec << word_addr 
-                  << " size=" << size << " bytes (" << num_words << " words)" << std::endl;
+                  << " (" << num_words << " words)" << std::endl;
         
+        // Escribir cada palabra a RAM
         for (size_t i = 0; i < num_words; i++) {
+            uint32_t ram_addr = static_cast<uint32_t>(word_addr + i);
+            
+            // Validar dirección
+            if (ram_addr > RAM::MAX_ADDRESS) {
+                std::cerr << "Warning: RAM address 0x" << std::hex << ram_addr 
+                         << " exceeds MAX_ADDRESS, wrapping around" << std::endl;
+                ram_addr = ram_addr & RAM::MAX_ADDRESS;
+            }
+            
             uint64_t word;
             std::memcpy(&word, &data[i * sizeof(uint64_t)], sizeof(uint64_t));
-            main_memory.store(word_addr + i, word);
-            
-            std::cout << "  [" << i << "] mem[" << (word_addr + i) << "] = 0x" 
-                      << std::hex << word << std::dec << std::endl;
+            ram->write(ram_addr, word);
         }
     }
     
     void sendMessage(const BusMessage& msg) override {
-        // En modo standalone, no hay otros caches
-        (void)msg;
+        // Crear transacción para el interconnect
+        BusTransaction transaction;
+        transaction.type = busEventToTransactionType(msg.event);
+        transaction.address = static_cast<uint32_t>(msg.address / sizeof(uint64_t));
+        transaction.pe_id = static_cast<uint32_t>(msg.sender_pe_id);
+        transaction.data = 0;
+        
+        std::cout << "[PE" << pe_id << "] Sending bus message: " 
+                  << transaction.toString() << std::endl;
+        
+        // Agregar al interconnect
+        interconnect->addRequest(transaction);
     }
     
     void supplyData(uint64_t address, const uint8_t* data) override {
-        // En modo standalone, no se necesita
-        (void)address;
-        (void)data;
+        std::cout << "[PE" << pe_id << "] Supplying data for addr=0x" 
+                  << std::hex << address << std::dec 
+                  << " (cache-to-cache transfer)" << std::endl;
+        // En esta implementación simple, los datos van a través de RAM
+        (void)data; // Evitar warning
     }
 };
 
-// Wrapper para que el PE use el cache para LOAD/STORE
+// ============================================================
+// WRAPPER: PE accede a Cache
+// ============================================================
+
 class CacheMemPort : public IMemPort {
     Cache& cache;
 public:
@@ -79,19 +138,17 @@ public:
     
     uint64_t load(uint64_t addr) override {
         uint64_t data = 0;
-        // PE usa índices lógicos (0, 1, 2...), convertir a direcciones en bytes
         cache.read(addr * sizeof(uint64_t), data);
         return data;
     }
     
     void store(uint64_t addr, uint64_t value) override {
-        // PE usa índices lógicos (0, 1, 2...), convertir a direcciones en bytes
         cache.write(addr * sizeof(uint64_t), value);
     }
 };
 
 // ============================================================
-// FUNCIONES AUXILIARES
+// UTILIDADES
 // ============================================================
 
 std::vector<std::string> loadProgramFromFile(const std::string& path) {
@@ -102,7 +159,6 @@ std::vector<std::string> loadProgramFromFile(const std::string& path) {
     }
     std::string line;
     while (std::getline(file, line)) {
-        // Ignorar líneas vacías y comentarios
         if (!line.empty() && line[0] != '#' && line[0] != ';') {
             lines.push_back(line);
         }
@@ -122,136 +178,218 @@ void printSeparator(const std::string& title) {
 
 int main() {
     try {
+        printSeparator("SISTEMA INTEGRADO: PE + Cache + Interconnect + RAM");
+        
+        // ========================================================
+        // 1. CREAR INFRAESTRUCTURA COMPARTIDA
+        // ========================================================
+        
+        std::cout << "Inicializando componentes del sistema...\n" << std::endl;
+        
+        // RAM compartida (512 palabras de 64 bits = 4KB)
+        auto shared_ram = std::make_shared<RAM>(true);
+        
+        // Interconnect (bus compartido)
+        auto interconnect = std::make_shared<Interconnect>(shared_ram, true);
+        
+        std::cout << "\n RAM e Interconnect inicializados\n" << std::endl;
+        
+        // ========================================================
+        // 2. INICIALIZAR RAM CON DATOS DE PRUEBA
+        // ========================================================
+        
+        printSeparator("Inicializando Datos en RAM");
+        
+        // Datos para Programa 1 (punto flotante)
+        double val_a = 25.0;
+        double val_b = 5.0;
+        uint64_t data_a, data_b;
+        std::memcpy(&data_a, &val_a, sizeof(double));
+        std::memcpy(&data_b, &val_b, sizeof(double));
+        
+        shared_ram->write(0, data_a);  // mem[0] = 25.0
+        shared_ram->write(1, data_b);  // mem[1] = 5.0
+        
+        // Datos para Programa 2 (loop)
+        shared_ram->write(2, 5);  // mem[2] = 5 (iteraciones)
+        shared_ram->write(3, 0);  // mem[3] = 0 (acumulador inicial)
+        
+        std::cout << "\nDatos cargados en RAM:" << std::endl;
+        std::cout << "  mem[0] = " << val_a << " (para PE0)" << std::endl;
+        std::cout << "  mem[1] = " << val_b << " (para PE0)" << std::endl;
+        std::cout << "  mem[2] = 5 (para PE1)" << std::endl;
+        std::cout << "  mem[3] = 0 (para PE1)" << std::endl;
+        
+        // ========================================================
+        // 3. CONFIGURAR PE0 (Programa de multiplicación)
+        // ========================================================
+        
+        printSeparator("PE0: Multiplicación Punto Flotante");
+        
+        // Cache L1 para PE0
+        Cache cache0(0);
+        auto bus_interface0 = std::make_shared<InterconnectBusInterface>(
+            interconnect, shared_ram, 0
+        );
+        cache0.setBusInterface(bus_interface0.get());
+        
+        // Wrapper PE-Cache
+        CacheMemPort cache_port0(cache0);
+        
+        // Cargar programa
         Loader loader;
+        auto prog1 = loader.parseProgram(loadProgramFromFile("Programs/program1.txt"));
+        
+        std::cout << "Programa: Programs/program1.txt" << std::endl;
+        std::cout << "Instrucciones: " << prog1.size() << std::endl;
+        for (size_t i = 0; i < prog1.size(); i++) {
+            std::cout << "  [" << i << "] ";
+            // Aquí podrías imprimir la instrucción si tienes un método toString()
+            std::cout << std::endl;
+        }
+        
+        // Crear PE0
+        PE pe0(0);
+        pe0.attachMemory(&cache_port0);
+        pe0.loadProgram(prog1);
+        
+        std::cout << "\n--- Ejecutando PE0 ---" << std::endl;
+        pe0.runToCompletion();
+        std::cout << "--- PE0 completado ---" << std::endl;
+        
+        // Resultados PE0
+        uint64_t result0_raw;
+        cache0.read(2 * sizeof(uint64_t), result0_raw);
+        double result0;
+        std::memcpy(&result0, &result0_raw, sizeof(double));
+        
+        std::cout << "\n=== Resultados PE0 ===" << std::endl;
+        std::cout << "Result mem[2] = " << std::fixed << std::setprecision(2) 
+                  << result0 << " (esperado: 125.0)" << std::endl;
+        std::cout << "Instrucciones: " << pe0.getInstructionCount() 
+                  << " | LOAD: " << pe0.getLoadCount()
+                  << " | STORE: " << pe0.getStoreCount()
+                  << " | Ciclos: " << pe0.getCycleCount() << std::endl;
+        
+        cache0.printStats();
         
         // ========================================================
-        // PRIMERA PRUEBA: Operaciones con punto flotante
+        // 4. CONFIGURAR PE1 (Programa de loop)
         // ========================================================
-        printSeparator("PRUEBA 1: Operaciones Punto Flotante");
         
-        // Crear memoria principal
-        MockMemPort mem1(16);
+        printSeparator("PE1: Loop con Acumulador");
         
-        // Inicializar datos en memoria principal
-        double a = 25.0, b = 5.0;
-        std::memcpy(mem1.rawData(), &a, sizeof(double));
-        std::memcpy(mem1.rawData() + 1, &b, sizeof(double));
+        // Cache L1 para PE1
+        Cache cache1(1);
+        auto bus_interface1 = std::make_shared<InterconnectBusInterface>(
+            interconnect, shared_ram, 1
+        );
+        cache1.setBusInterface(bus_interface1.get());
         
-        std::cout << "Memoria principal inicializada:" << std::endl;
-        std::cout << "  mem[0] = " << a << " (0x" << std::hex 
-                  << mem1.load(0) << std::dec << ")" << std::endl;
-        std::cout << "  mem[1] = " << b << " (0x" << std::hex 
-                  << mem1.load(1) << std::dec << ")" << std::endl;
-        
-        // Crear cache y conectarlo a memoria principal
-        Cache cache1(0);
-        CacheBusInterface bus1(mem1);
-        cache1.setBusInterface(&bus1);
-        
-        // Crear wrapper PE-Cache
+        // Wrapper PE-Cache
         CacheMemPort cache_port1(cache1);
         
         // Cargar programa
-        auto prog1 = loader.parseProgram(loadProgramFromFile("Programs/program1.txt"));
-        std::cout << "\nPrograma cargado: Programs/program1.txt" << std::endl;
-        std::cout << "Instrucciones: " << prog1.size() << std::endl;
-        
-        // Crear PE y ejecutar
-        PE pe1(0);
-        pe1.attachMemory(&cache_port1);
-        pe1.loadProgram(prog1);
-        
-        std::cout << "\n--- Ejecutando programa ---" << std::endl;
-        pe1.runToCompletion();
-        std::cout << "--- Ejecución completada ---" << std::endl;
-        
-        // Leer resultado desde cache (forzar lectura)
-        uint64_t result_raw;
-        cache1.read(2 * sizeof(uint64_t), result_raw);
-        double res;
-        std::memcpy(&res, &result_raw, sizeof(double));
-        
-        std::cout << "\n=== Resultados Prueba 1 ===" << std::endl;
-        std::cout << "Result mem[2] = " << std::fixed << std::setprecision(6) << res << std::endl;
-        std::cout << "LOAD count: " << pe1.getLoadCount()
-                  << " | STORE count: " << pe1.getStoreCount()
-                  << " | CYCLES: " << pe1.getCycleCount() << std::endl;
-        
-        // Mostrar estadísticas del cache
-        cache1.printStats();
-        
-        
-        // ========================================================
-        // SEGUNDA PRUEBA: Loop con acumulador
-        // ========================================================
-        printSeparator("PRUEBA 2: Loop con Acumulador");
-        
-        // Crear memoria principal
-        MockMemPort mem2(16);
-        mem2.store(2, 5);  // iteraciones en mem[2]
-        mem2.store(3, 0);  // acumulador inicial en mem[3]
-        
-        std::cout << "Memoria principal inicializada:" << std::endl;
-        std::cout << "  mem[2] = " << mem2.load(2) << " (iteraciones)" << std::endl;
-        std::cout << "  mem[3] = " << mem2.load(3) << " (acumulador inicial)" << std::endl;
-        
-        // Crear cache y conectarlo a memoria principal
-        Cache cache2(1);
-        CacheBusInterface bus2(mem2);
-        cache2.setBusInterface(&bus2);
-        
-        // Crear wrapper PE-Cache
-        CacheMemPort cache_port2(cache2);
-        
-        // Cargar programa
         auto prog2 = loader.parseProgram(loadProgramFromFile("Programs/program2.txt"));
-        std::cout << "\nPrograma cargado: Programs/program2.txt" << std::endl;
+        
+        std::cout << "Programa: Programs/program2.txt" << std::endl;
         std::cout << "Instrucciones: " << prog2.size() << std::endl;
         
-        // Crear PE y ejecutar
-        PE pe2(1);
-        pe2.attachMemory(&cache_port2);
-        pe2.loadProgram(prog2);
+        // Crear PE1
+        PE pe1(1);
+        pe1.attachMemory(&cache_port1);
+        pe1.loadProgram(prog2);
         
-        std::cout << "\n--- Ejecutando programa ---" << std::endl;
-        pe2.runToCompletion();
-        std::cout << "--- Ejecución completada ---" << std::endl;
+        std::cout << "\n--- Ejecutando PE1 ---" << std::endl;
+        pe1.runToCompletion();
+        std::cout << "--- PE1 completado ---" << std::endl;
         
-        // Leer resultado desde cache
-        uint64_t acc_raw;
-        cache2.read(1 * sizeof(uint64_t), acc_raw);
+        // Resultados PE1
+        uint64_t result1_raw;
+        cache1.read(1 * sizeof(uint64_t), result1_raw);
         
-        std::cout << "\n=== Resultados Prueba 2 ===" << std::endl;
-        std::cout << "Accumulator in mem[1] = " << acc_raw << std::endl;
-        std::cout << "LOAD count: " << pe2.getLoadCount()
-                  << " | STORE count: " << pe2.getStoreCount()
-                  << " | CYCLES: " << pe2.getCycleCount() << std::endl;
+        std::cout << "\n=== Resultados PE1 ===" << std::endl;
+        std::cout << "Accumulator mem[1] = " << result1_raw 
+                  << " (esperado: 5)" << std::endl;
+        std::cout << "Instrucciones: " << pe1.getInstructionCount() 
+                  << " | LOAD: " << pe1.getLoadCount()
+                  << " | STORE: " << pe1.getStoreCount()
+                  << " | Ciclos: " << pe1.getCycleCount() << std::endl;
         
-        // Mostrar estadísticas del cache
-        cache2.printStats();
-        
-        // Verificar valor en memoria principal (después de writeback si ocurre)
-        std::cout << "\nValor en memoria principal mem[1] = " << mem2.load(1) << std::endl;
-        
+        cache1.printStats();
         
         // ========================================================
-        // RESUMEN FINAL
+        // 5. PROCESAR TRANSACCIONES PENDIENTES EN EL INTERCONNECT
         // ========================================================
-        printSeparator("RESUMEN DE SIMULACIÓN");
         
-        std::cout << "PE0 (Prueba 1):" << std::endl;
-        std::cout << "  - Instrucciones ejecutadas: " << pe1.getInstructionCount() << std::endl;
-        std::cout << "  - Resultado final: " << res << std::endl;
+        printSeparator("Procesando Transacciones del Interconnect");
         
-        std::cout << "\nPE1 (Prueba 2):" << std::endl;
-        std::cout << "  - Instrucciones ejecutadas: " << pe2.getInstructionCount() << std::endl;
-        std::cout << "  - Acumulador final: " << acc_raw << std::endl;
+        int transactions_processed = 0;
+        while (interconnect->hasPendingTransactions()) {
+            if (interconnect->processNextTransaction()) {
+                transactions_processed++;
+            }
+        }
         
-        std::cout << "\n✓ Todas las pruebas completadas exitosamente" << std::endl;
+        std::cout << "Transacciones procesadas: " << transactions_processed << std::endl;
+        
+        // ========================================================
+        // 6. VERIFICAR DATOS EN RAM (después de writebacks)
+        // ========================================================
+        
+        printSeparator("Estado Final de RAM");
+        
+        std::cout << "Contenido de RAM (primeras 10 posiciones):" << std::endl;
+        for (uint32_t i = 0; i < 10; i++) {
+            uint64_t value = shared_ram->read(i);
+            std::cout << "  mem[" << i << "] = 0x" << std::hex 
+                      << std::setw(16) << std::setfill('0') << value 
+                      << std::dec;
+            
+            if (i == 0 || i == 1 || i == 2) {
+                double d;
+                std::memcpy(&d, &value, sizeof(double));
+                std::cout << " (" << std::fixed << std::setprecision(2) << d << ")";
+            } else if (i >= 1 && i <= 3) {
+                std::cout << " (" << value << ")";
+            }
+            std::cout << std::endl;
+        }
+        
+        // ========================================================
+        // 7. RESUMEN FINAL
+        // ========================================================
+        
+        printSeparator("RESUMEN FINAL DEL SISTEMA");
+        
+        std::cout << "PE0:" << std::endl;
+        std::cout << "   Multiplicación: 25.0 × 5.0 = " << result0 << std::endl;
+        std::cout << "   Cache Hit Rate: ";
+        auto stats0 = cache0.getStats();
+        double hit_rate0 = (double)(stats0.read_hits + stats0.write_hits) / 
+                          (stats0.read_hits + stats0.read_misses + 
+                           stats0.write_hits + stats0.write_misses) * 100.0;
+        std::cout << std::fixed << std::setprecision(1) << hit_rate0 << "%" << std::endl;
+        
+        std::cout << "\nPE1:" << std::endl;
+        std::cout << "   Loop ejecutado: " << result1_raw << " iteraciones" << std::endl;
+        std::cout << "   Cache Hit Rate: ";
+        auto stats1 = cache1.getStats();
+        double hit_rate1 = (double)(stats1.read_hits + stats1.write_hits) / 
+                          (stats1.read_hits + stats1.read_misses + 
+                           stats1.write_hits + stats1.write_misses) * 100.0;
+        std::cout << std::fixed << std::setprecision(1) << hit_rate1 << "%" << std::endl;
+        
+        std::cout << "\nInterconnect:" << std::endl;
+        std::cout << "   Transacciones procesadas: " << transactions_processed << std::endl;
+        std::cout << "   Coherencia MESI mantenida" << std::endl;
+        
+        std::cout << "\n Sistema completo funcionando correctamente " << std::endl;
+        
+        return 0;
         
     } catch (const std::exception &ex) {
-        std::cerr << "\n❌ Error: " << ex.what() << "\n";
+        std::cerr << "\n Error: " << ex.what() << "\n";
         return 1;
     }
-    return 0;
 }

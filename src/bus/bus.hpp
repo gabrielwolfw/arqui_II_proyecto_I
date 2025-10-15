@@ -14,8 +14,8 @@ enum class BusTransactionType {
 struct BusTransaction {
     BusTransactionType type;
     uint32_t address;      // Block address
-    uint32_t pe_id;       // Processing Element ID
-    uint32_t data;        // Data for write operations
+    uint32_t pe_id;        // Processing Element ID
+    uint64_t data;         // ← CAMBIADO: uint32_t -> uint64_t
     
     std::string toString() const {
         std::string typeStr;
