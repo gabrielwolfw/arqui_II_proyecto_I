@@ -1,7 +1,39 @@
-LOAD REG0, 2
-LOAD REG1, 3
-LOOP:
-INC REG1
-DEC REG0
-JNZ LOOP
-STORE REG1, 1
+# PE1: Calcula su rango de elementos
+# REG1: N (tamaño del vector)
+# REG2: N/4 (elementos por PE)
+# REG3: índice inicial
+# REG4: contador de bucle
+# REG5: índice actual A
+# REG6: índice actual B
+# REG7: acumulador de suma
+# REG8: producto temporal
+# REG9: valor de A[i]
+# REG10: valor de B[i]
+
+# Obtener tamaño y calcular rango
+LOAD REG1, 0        # Carga N (tamaño total del vector)
+DIV REG2, REG1, 4   # N/4 = elementos por PE
+MUL REG3, REG2, 1   # PE_id * (N/4) = índice inicial para PE1
+
+# Inicializa suma parcial con 0.0
+MOVE REG7, 0        # Inicializa acumulador con cero
+
+# Bucle para procesar elementos
+MOVE REG4, 0        # Contador de elementos procesados
+
+LOOP_START:
+    ADD REG5, REG3, REG4   # índice actual = inicio + contador
+    ADD REG6, REG5, REG1   # índice B = índice A + N
+
+    LOAD REG9, REG5    # A[i]
+    LOAD REG10, REG6   # B[i]
+
+    FMUL REG8, REG9, REG10   # A[i] * B[i]
+    FADD REG7, REG7, REG8    # suma += A[i] * B[i]
+
+    ADD REG4, REG4, 1        # incrementa contador
+    CMP REG4, REG2           # compara con N/4
+    JL LOOP_START            # si contador < N/4, continúa
+
+# Almacena resultado
+STORE REG7, 25    # Guarda suma parcial en mem[25]

@@ -22,6 +22,7 @@ public:
     uint64_t getLoadCount() const;
     uint64_t getStoreCount() const;
     uint64_t getCycleCount() const;
+    int getIntInstructionCount() const;
 
     const uint64_t* regs() const;
     int getId() const { return id_; }
@@ -41,4 +42,5 @@ private:
     uint64_t load_count_;
     uint64_t store_count_;
     uint64_t cycle_count_;
+    int int_instr_count_;
 };

@@ -104,14 +104,26 @@ std::vector<Instruction> Loader::secondPass(const std::vector<std::string>& line
             int rd = regIndex(tokens[1]);
             if (rd == -1) throw std::runtime_error("LOAD espera registro como destino: " + tokens[1]);
             inst.rd = rd;
-            inst.imm = std::stoi(tokens[2]);
+            // Puede ser registro o inmediato
+            int ra = regIndex(tokens[2]);
+            if (ra != -1) {
+                inst.ra = ra;
+            } else {
+                inst.imm = std::stoi(tokens[2]);
+            }
         } 
         else if (opcode == "STORE") {
             inst.op = OpCode::STORE;
             int ra = regIndex(tokens[1]);
             if (ra == -1) throw std::runtime_error("STORE espera registro como fuente: " + tokens[1]);
             inst.ra = ra; // registro fuente del dato
-            inst.imm = std::stoi(tokens[2]); // dirección destino
+            // Puede ser registro o inmediato
+            int rb = regIndex(tokens[2]);
+            if (rb != -1) {
+                inst.rb = rb;
+            } else {
+                inst.imm = std::stoi(tokens[2]);
+            }
         }
         else if (opcode == "FMUL") {
             inst.op = OpCode::FMUL;
@@ -133,6 +145,122 @@ std::vector<Instruction> Loader::secondPass(const std::vector<std::string>& line
             inst.ra = ra;
             inst.rb = rb;
         } 
+        else if (opcode == "DIV") {
+            inst.op = OpCode::DIV;
+            int rd = regIndex(tokens[1]);
+            int ra = regIndex(tokens[2]);
+            if (rd == -1 || ra == -1) throw std::runtime_error("DIV espera registro destino y registro fuente");
+            inst.rd = rd;
+            inst.ra = ra;
+            
+            // El tercer operando puede ser registro o inmediato
+            int rb = regIndex(tokens[3]);
+            if (rb != -1) {
+                inst.rb = rb;  // Es un registro
+            } else {
+                try {
+                    inst.imm = std::stoi(tokens[3]);  // Es un inmediato
+                    inst.rb = -1;  // Marcamos que usamos inmediato
+                } catch (...) {
+                    throw std::runtime_error("DIV espera registro o número como tercer operando");
+                }
+            }
+        }
+        else if (opcode == "MUL") {
+            inst.op = OpCode::MUL;
+            int rd = regIndex(tokens[1]);
+            int ra = regIndex(tokens[2]);
+            if (rd == -1 || ra == -1) throw std::runtime_error("MUL espera registro destino y registro fuente");
+            inst.rd = rd;
+            inst.ra = ra;
+            
+            // El tercer operando puede ser registro o inmediato
+            int rb = regIndex(tokens[3]);
+            if (rb != -1) {
+                inst.rb = rb;  // Es un registro
+            } else {
+                try {
+                    inst.imm = std::stoi(tokens[3]);  // Es un inmediato
+                    inst.rb = -1;  // Marcamos que usamos inmediato
+                } catch (...) {
+                    throw std::runtime_error("MUL espera registro o número como tercer operando");
+                }
+            }
+        }
+        else if (opcode == "MOVE") {
+            inst.op = OpCode::MOVE;
+            int rd = regIndex(tokens[1]);
+            if (rd == -1) throw std::runtime_error("MOVE espera registro como destino");
+            inst.rd = rd;
+            
+            // El segundo operando puede ser registro o inmediato
+            int ra = regIndex(tokens[2]);
+            if (ra != -1) {
+                inst.ra = ra;  // Es un registro
+            } else {
+                try {
+                    inst.imm = std::stoi(tokens[2]);  // Es un inmediato
+                    inst.ra = -1;  // Marcamos que usamos inmediato
+                } catch (...) {
+                    throw std::runtime_error("MOVE espera registro o número como segundo operando");
+                }
+            }
+        }
+        else if (opcode == "ADD") {
+            inst.op = OpCode::ADD;
+            int rd = regIndex(tokens[1]);
+            int ra = regIndex(tokens[2]);
+            if (rd == -1 || ra == -1) throw std::runtime_error("ADD espera registro destino y registro fuente");
+            inst.rd = rd;
+            inst.ra = ra;
+            
+            // El tercer operando puede ser registro o inmediato
+            int rb = regIndex(tokens[3]);
+            if (rb != -1) {
+                inst.rb = rb;  // Es un registro
+            } else {
+                try {
+                    inst.imm = std::stoi(tokens[3]);  // Es un inmediato
+                    inst.rb = -1;  // Marcamos que usamos inmediato
+                } catch (...) {
+                    throw std::runtime_error("ADD espera registro o número como tercer operando");
+                }
+            }
+        }
+        else if (opcode == "CMP") {
+            inst.op = OpCode::CMP;
+            int ra = regIndex(tokens[1]);
+            if (ra == -1) throw std::runtime_error("CMP espera registro como primer operando");
+            inst.ra = ra;
+            
+            // El segundo operando puede ser registro o inmediato
+            int rb = regIndex(tokens[2]);
+            if (rb != -1) {
+                inst.rb = rb;  // Es un registro
+            } else {
+                try {
+                    inst.imm = std::stoi(tokens[2]);  // Es un inmediato
+                    inst.rb = -1;  // Marcamos que usamos inmediato
+                } catch (...) {
+                    throw std::runtime_error("CMP espera registro o número como segundo operando");
+                }
+            }
+        }
+        else if (opcode == "JL") {
+            inst.op = OpCode::JL;
+            std::string target = trim(tokens[1]);
+            // Si es etiqueta, busca en el diccionario
+            if (labels.count(target)) {
+                inst.imm = labels[target];
+            } else {
+                // Si no, intenta convertir a número
+                try {
+                    inst.imm = std::stoi(target);
+                } catch (...) {
+                    throw std::runtime_error("Etiqueta no encontrada para JL: '" + target + "'");
+                }
+            }
+        }
         else if (opcode == "INC") {
             inst.op = OpCode::INC;
             int rd = regIndex(tokens[1]);
@@ -174,4 +302,79 @@ std::vector<Instruction> Loader::secondPass(const std::vector<std::string>& line
 std::vector<Instruction> Loader::parseProgram(const std::vector<std::string>& lines) {
     firstPass(lines);
     return secondPass(lines);
+}
+
+std::string Loader::parseInstructionToString(const Instruction& inst) {
+    std::stringstream ss;
+    switch (inst.op) {
+        case OpCode::LOAD:
+            if (inst.ra != -1)
+                ss << "LOAD R" << inst.rd << ", R" << inst.ra;
+            else
+                ss << "LOAD R" << inst.rd << ", " << inst.imm;
+            break;
+        case OpCode::STORE:
+            if (inst.rb != -1)
+                ss << "STORE R" << inst.ra << ", R" << inst.rb;
+            else
+                ss << "STORE R" << inst.ra << ", " << inst.imm;
+            break;
+        case OpCode::FMUL:
+            ss << "FMUL R" << inst.rd << ", R" << inst.ra << ", R" << inst.rb;
+            break;
+        case OpCode::FADD:
+            ss << "FADD R" << inst.rd << ", R" << inst.ra << ", R" << inst.rb;
+            break;
+        case OpCode::DIV:
+            if (inst.rb != -1) {
+                ss << "DIV R" << inst.rd << ", R" << inst.ra << ", R" << inst.rb;
+            } else {
+                ss << "DIV R" << inst.rd << ", R" << inst.ra << ", " << inst.imm;
+            }
+            break;
+        case OpCode::MUL:
+            if (inst.rb != -1) {
+                ss << "MUL R" << inst.rd << ", R" << inst.ra << ", R" << inst.rb;
+            } else {
+                ss << "MUL R" << inst.rd << ", R" << inst.ra << ", " << inst.imm;
+            }
+            break;
+        case OpCode::MOVE:
+            if (inst.ra != -1) {
+                ss << "MOVE R" << inst.rd << ", R" << inst.ra;
+            } else {
+                ss << "MOVE R" << inst.rd << ", " << inst.imm;
+            }
+            break;
+        case OpCode::ADD:
+            if (inst.rb != -1) {
+                ss << "ADD R" << inst.rd << ", R" << inst.ra << ", R" << inst.rb;
+            } else {
+                ss << "ADD R" << inst.rd << ", R" << inst.ra << ", " << inst.imm;
+            }
+            break;
+        case OpCode::CMP:
+            if (inst.rb != -1) {
+                ss << "CMP R" << inst.ra << ", R" << inst.rb;
+            } else {
+                ss << "CMP R" << inst.ra << ", " << inst.imm;
+            }
+            break;
+        case OpCode::JL:
+            ss << "JL " << inst.imm;
+            break;
+        case OpCode::INC:
+            ss << "INC R" << inst.rd;
+            break;
+        case OpCode::DEC:
+            ss << "DEC R" << inst.rd;
+            break;
+        case OpCode::JNZ:
+            ss << "JNZ " << inst.imm;
+            break;
+        default:
+            ss << "INVALID";
+            break;
+    }
+    return ss.str();
 }

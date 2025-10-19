@@ -1,4 +1,4 @@
-# PE0: Calcula su rango de elementos
+# PE3: Calcula su rango de elementos
 # REG1: N (tamaño del vector)
 # REG2: N/4 (elementos por PE)
 # REG3: índice inicial
@@ -13,7 +13,7 @@
 # Obtener tamaño y calcular rango
 LOAD REG1, 0        # Carga N (tamaño total del vector)
 DIV REG2, REG1, 4   # N/4 = elementos por PE
-MUL REG3, REG2, 0   # PE_id * (N/4) = índice inicial para PE0 (0)
+MUL REG3, REG2, 3   # PE_id * (N/4) = índice inicial para PE3
 
 # Inicializa suma parcial con 0.0
 MOVE REG7, 0        # Inicializa acumulador con cero
@@ -36,4 +36,4 @@ LOOP_START:
     JL LOOP_START            # si contador < N/4, continúa
 
 # Almacena resultado
-STORE REG7, 24    # Guarda suma parcial en mem[24]
+STORE REG7, 27    # Guarda suma parcial en mem[27]

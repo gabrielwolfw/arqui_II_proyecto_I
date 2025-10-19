@@ -12,7 +12,13 @@ enum class OpCode {
     FADD,   // FADD Rd, Ra, Rb
     INC,    // INC REG
     DEC,    // DEC REG
-    JNZ     // JNZ label  (usa REG0 como contador implicito)
+    JNZ,    // JNZ label  (usa REG0 como contador implicito)
+    DIV,    // DIV Rd, Ra, Rb    (división entera)
+    MUL,    // MUL Rd, Ra, Rb    (multiplicación entera)
+    MOVE,   // MOVE Rd, Ra       (mover entre registros)
+    ADD,    // ADD Rd, Ra, Rb    (suma entera)
+    CMP,    // CMP Ra, Rb        (compara Ra con Rb)
+    JL      // JL label          (salta si último CMP fue menor)
 };
 
 struct Instruction {

@@ -10,6 +10,7 @@ public:
 
     // Convierte líneas de texto en un vector de instrucciones ejecutables
     std::vector<Instruction> parseProgram(const std::vector<std::string>& lines);
+    std::string parseInstructionToString(const Instruction& inst);
 
 private:
     std::unordered_map<std::string, int> labels;

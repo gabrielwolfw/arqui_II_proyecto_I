@@ -8,6 +8,16 @@ Interconnect::Interconnect(std::shared_ptr<RAM> ram, bool verbose)
     , verbose_(verbose) {
 }
 
+void Interconnect::registerCache(Cache* cache) {
+    if (cache) {
+        caches_.push_back(cache);
+        if (verbose_) {
+            std::cout << "[Interconnect] Registered new cache, total: " 
+                      << caches_.size() << std::endl;
+        }
+    }
+}
+
 void Interconnect::addRequest(const BusTransaction& transaction) {
     if (transaction.pe_id >= pe_queues_.size()) {
         throw std::runtime_error("Invalid PE ID");
@@ -15,7 +25,31 @@ void Interconnect::addRequest(const BusTransaction& transaction) {
     pe_queues_[transaction.pe_id].push(transaction);
     
     if (verbose_) {
-        std::cout << "Added transaction: " << transaction.toString() << std::endl;
+        std::cout << "[Interconnect] Broadcasting message from PE" 
+                  << transaction.pe_id << " for addr=0x" 
+                  << std::hex << transaction.address << std::dec << std::endl;
+    }
+    
+    // Notificar a todas las cachés excepto al emisor
+    for (Cache* cache : caches_) {
+        if (cache) {
+            // transaction.type es BusTransactionType
+            switch (transaction.type) {
+                case BusTransactionType::BusRd:
+                    // transaction.address es un índice de palabra/bloque; convertir a bytes
+                    cache->handleBusRead(static_cast<uint64_t>(transaction.address) * sizeof(uint64_t));
+                    break;
+                case BusTransactionType::BusRdX:
+                    cache->handleBusReadX(static_cast<uint64_t>(transaction.address) * sizeof(uint64_t));
+                    break;
+                case BusTransactionType::BusUpgr:
+                    cache->invalidateLine(static_cast<uint64_t>(transaction.address) * sizeof(uint64_t));
+                    break;
+                default:
+                    // BusWB y otros no requieren notificación de invalidación/lectura
+                    break;
+            }
+        }
     }
 }
 
@@ -43,14 +77,20 @@ bool Interconnect::processNextTransaction() {
         std::cout << "Processing transaction: " << transaction.toString() << std::endl;
     }
     
-    // Handle the transaction based on type
+    // Handle transaction y notificar a las cachés cuando sea necesario
     switch (transaction.type) {
         case BusTransactionType::BusRd:
             transaction.data = ram_->read(transaction.address);
+            // Notificar BUS_READ a otras cachés
+            notifyCaches(transaction.address * sizeof(uint64_t), 
+                        transaction.pe_id, BusEvent::BUS_READ);
             break;
             
         case BusTransactionType::BusRdX:
             transaction.data = ram_->read(transaction.address);
+            // Notificar BUS_READX a otras cachés
+            notifyCaches(transaction.address * sizeof(uint64_t), 
+                        transaction.pe_id, BusEvent::BUS_READX);
             break;
             
         case BusTransactionType::BusWB:
@@ -58,7 +98,9 @@ bool Interconnect::processNextTransaction() {
             break;
             
         case BusTransactionType::BusUpgr:
-            // No memory operation needed, just state transition
+            // Notificar BUS_UPGRADE a otras cachés
+            notifyCaches(transaction.address * sizeof(uint64_t), 
+                        transaction.pe_id, BusEvent::BUS_UPGRADE);
             break;
     }
     
@@ -67,6 +109,38 @@ bool Interconnect::processNextTransaction() {
     current_pe_ = (next_pe + 1) % pe_queues_.size();
     
     return true;
+}
+
+void Interconnect::notifyCaches(uint64_t address, int sender_pe_id, BusEvent event) {
+    BusMessage msg{address, event, sender_pe_id};
+    broadcastBusMessage(msg);
+}
+
+void Interconnect::broadcastBusMessage(const BusMessage& msg) {
+    if (verbose_) {
+        std::cout << "[Interconnect] Broadcasting message from PE" 
+                  << msg.sender_pe_id << " for addr=0x" 
+                  << std::hex << msg.address << std::dec << std::endl;
+    }
+    
+    // Notificar a todas las cachés excepto al emisor
+    for (Cache* cache : caches_) {
+        if (cache) {
+            switch (msg.event) {
+                case BusEvent::BUS_READ:
+                    cache->handleBusRead(msg.address);
+                    break;
+                case BusEvent::BUS_READX:
+                    cache->handleBusReadX(msg.address);
+                    break;
+                case BusEvent::BUS_UPGRADE:
+                    cache->invalidateLine(msg.address);
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
 }
 
 bool Interconnect::hasPendingTransactions() const {
