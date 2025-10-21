@@ -181,6 +181,16 @@ void PE::executeInstruction(const Instruction& inst, size_t &pc) {
             cycle_count_ += 1;
             break;
         }
+        case OpCode::JLE: {
+            // Salta si REG[0] es 1 (menos) o 0 (igual)
+            if (regs_[0] == 1 || regs_[0] == 0) {
+                pc = inst.imm;
+            } else {
+                ++pc;
+            }
+            cycle_count_ += 1;
+            break;
+        }
         case OpCode::INC: {
             regs_[inst.rd] = (uint64_t)((int64_t)regs_[inst.rd] + 1);
             cycle_count_ += 1;

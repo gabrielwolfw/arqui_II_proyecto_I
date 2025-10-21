@@ -18,7 +18,8 @@ enum class OpCode {
     MOVE,   // MOVE Rd, Ra       (mover entre registros)
     ADD,    // ADD Rd, Ra, Rb    (suma entera)
     CMP,    // CMP Ra, Rb        (compara Ra con Rb)
-    JL      // JL label          (salta si último CMP fue menor)
+    JL,     // JL label          (salta si último CMP fue menor)
+    JLE     // JLE label         (salta si último CMP fue menor o igual)
 };
 
 struct Instruction {

@@ -261,6 +261,21 @@ std::vector<Instruction> Loader::secondPass(const std::vector<std::string>& line
                 }
             }
         }
+        else if (opcode == "JLE") {
+            inst.op = OpCode::JLE;
+            std::string target = trim(tokens[1]);
+            // Si es etiqueta, busca en el diccionario
+            if (labels.count(target)) {
+                inst.imm = labels[target];
+            } else {
+                // Si no, intenta convertir a número
+                try {
+                    inst.imm = std::stoi(target);
+                } catch (...) {
+                    throw std::runtime_error("Etiqueta no encontrada para JLE: '" + target + "'");
+                }
+            }
+        }
         else if (opcode == "INC") {
             inst.op = OpCode::INC;
             int rd = regIndex(tokens[1]);
@@ -362,6 +377,9 @@ std::string Loader::parseInstructionToString(const Instruction& inst) {
             break;
         case OpCode::JL:
             ss << "JL " << inst.imm;
+            break;
+        case OpCode::JLE:
+            ss << "JLE " << inst.imm;
             break;
         case OpCode::INC:
             ss << "INC R" << inst.rd;

@@ -33,7 +33,7 @@ LOOP_START:
 
     ADD REG4, REG4, 1        # incrementa contador
     CMP REG4, REG2           # compara con N/4
-    JL LOOP_START            # si contador < N/4, continúa
+    JL LOOP_START            # si contador < N/4
 
 # Almacena resultado
 STORE REG7, 26    # Guarda suma parcial en mem[26]
