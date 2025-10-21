@@ -268,14 +268,25 @@ int main() {
         // ========================================================
         // 4. EJECUTAR LOS 4 PEs
         // ========================================================
-        
-        printSeparator("EJECUTANDO LOS 4 PEs");
-        
+                
+        printSeparator("EJECUTANDO LOS 4 PEs EN PARALELO");
+
+        // Iniciar todos los PEs al mismo tiempo
+        std::cout << "Iniciando los 4 PEs simultáneamente...\n" << std::endl;
         for (int i = 0; i < 4; i++) {
-            std::cout << "\n--- Ejecutando PE" << i << " ---" << std::endl;
-            pes[i]->runToCompletion();
-            std::cout << "--- PE" << i << " completado ---" << std::endl;
+            pes[i]->start();
+            std::cout << "PE" << i << " iniciado" << std::endl;
         }
+
+        std::cout << "\nTodos los PEs están corriendo en paralelo..." << std::endl;
+
+        // Esperar a que todos terminen
+        for (int i = 0; i < 4; i++) {
+            pes[i]->join();
+            std::cout << "PE" << i << " completado" << std::endl;
+        }
+
+        std::cout << "\nTodos los PEs han terminado su ejecución\n" << std::endl;
         
         // ========================================================
         // 5. RESULTADOS DE CADA PE
