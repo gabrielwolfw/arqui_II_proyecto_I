@@ -23,6 +23,7 @@ MOVE REG4, 0        # Contador de elementos procesados
 
 LOOP_START:
     ADD REG5, REG3, REG4   # índice actual = inicio + contador
+    ADD REG5, REG5, 1      # Ajuste: vectores empiezan en mem[1], no mem[0]
     ADD REG6, REG5, REG1   # índice B = índice A + N
 
     LOAD REG9, REG5    # A[i]
