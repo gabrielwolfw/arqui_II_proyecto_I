@@ -168,13 +168,65 @@ void printSeparator(const std::string& title) {
     std::cout << "========================================\n" << std::endl;
 }
 
+void waitForEnter(bool stepping_mode, const std::string& message = "") {
+    if (stepping_mode) {
+        if (!message.empty()) {
+            std::cout << message << std::endl;
+        }
+        std::cout << "Presione ENTER para continuar...";
+        std::cin.get();
+    }
+}
+
 // ============================================================
 // MAIN
 // ============================================================
 
-int main() {
+#include "Clock/Clock.hpp"
+#include <thread>
+#include <atomic>
+
+std::atomic<bool> running(true);
+
+void clockControlThread(bool stepping_mode) {
+    if (stepping_mode) {
+        std::cout << "Control de reloj: Presione ENTER para avanzar un ciclo, 'q' para salir" << std::endl;
+        while (running) {
+            char input;
+            std::cin.get(input);
+            if (input == 'q' || input == 'Q') {
+                running = false;
+                break;
+            }
+            Clock::getInstance().step();
+        }
+    }
+}
+
+int main(int argc, char* argv[]) {
+    bool stepping_mode = false;
+    
+    // Procesar argumentos de línea de comandos
+    for (int i = 1; i < argc; i++) {
+        std::string arg = argv[i];
+        if (arg == "--step" || arg == "-s") {
+            stepping_mode = true;
+        }
+    }
+    
     try {
+        Clock::getInstance().setSteppingMode(stepping_mode);
+        
         printSeparator("SISTEMA INTEGRADO: 4 PEs + Cache + Interconnect + RAM");
+        if (stepping_mode) {
+            std::cout << "Modo paso a paso por ciclos activado.\n" << std::endl;
+        }
+        
+        // Iniciar thread de control del reloj
+        std::thread clock_thread;
+        if (stepping_mode) {
+            clock_thread = std::thread(clockControlThread, stepping_mode);
+        }
         
         // ========================================================
         // 1. CREAR INFRAESTRUCTURA COMPARTIDA
@@ -198,6 +250,120 @@ int main() {
         // ========================================================
             
         printSeparator("Cargando Vectores desde Archivos");
+            
+        try {
+            shared_ram->loadVectorsToMemory(
+                "vectores/vector_a.txt", 
+                "vectores/vector_b.txt"
+            );
+        } catch (const std::exception& e) {
+            std::cerr << "Error cargando vectores desde archivos: " 
+                      << e.what() << std::endl;
+            throw;
+        }
+
+        // ========================================================
+        // 3. CONFIGURAR LOS 4 PEs CON SUS CACHÉS
+        // ========================================================
+        
+        // Crear loader
+        Loader loader;
+        
+        // Arrays para almacenar los componentes
+        std::vector<std::unique_ptr<Cache>> caches;
+        std::vector<std::shared_ptr<InterconnectBusInterface>> bus_interfaces;
+        std::vector<std::unique_ptr<CacheMemPort>> cache_ports;
+        std::vector<std::unique_ptr<PE>> pes;
+        
+        // Configurar los 4 PEs
+        for (int i = 0; i < 4; i++) {
+            printSeparator("Configurando PE" + std::to_string(i));
+            
+            caches.push_back(std::make_unique<Cache>(i));
+            bus_interfaces.push_back(std::make_shared<InterconnectBusInterface>(
+                interconnect, shared_ram, bus_controller, i
+            ));
+            
+            caches[i]->setBusInterface(bus_interfaces[i].get());
+            bus_controller->registerCache(caches[i].get());
+            
+            cache_ports.push_back(std::make_unique<CacheMemPort>(*caches[i]));
+            
+            pes.push_back(std::make_unique<PE>(i));
+            pes[i]->attachMemory(cache_ports[i].get());
+            
+            std::string program_file = "Programs/program" + std::to_string(i + 1) + ".txt";
+            auto pe_program = loader.parseProgram(loadProgramFromFile(program_file));
+            pes[i]->loadProgram(pe_program);
+            
+            std::cout << "PE" << i << " configurado correctamente" << std::endl;
+        }
+        
+        // ========================================================
+        // 4. EJECUTAR LOS 4 PEs
+        // ========================================================
+        
+        printSeparator("EJECUTANDO LOS 4 PEs");
+        
+        for (int i = 0; i < 4; i++) {
+            pes[i]->start();
+        }
+        
+        for (int i = 0; i < 4; i++) {
+            pes[i]->join();
+        }
+        
+        // ========================================================
+        // 5. RESULTADOS
+        // ========================================================
+        
+        printSeparator("RESULTADOS FINALES");
+        
+        for (int i = 0; i < 4; i++) {
+            std::cout << "\nPE" << i << " completado:" << std::endl;
+            std::cout << "Instrucciones: " << pes[i]->getInstructionCount() << std::endl;
+            std::cout << "Ciclos: " << pes[i]->getCycleCount() << std::endl;
+            caches[i]->printStats();
+        }
+
+        // Esperar y limpiar el thread del reloj
+        if (stepping_mode && clock_thread.joinable()) {
+            running = false;
+            clock_thread.join();
+        }
+
+        std::cout << "\nEjecución completada con éxito." << std::endl;
+        return 0;
+        
+    } catch (const std::exception &ex) {
+        std::cerr << "\nError: " << ex.what() << "\n";
+        return 1;
+    }
+
+        
+        // ========================================================
+        // 1. CREAR INFRAESTRUCTURA COMPARTIDA
+        // ========================================================
+        
+        std::cout << "Inicializando componentes del sistema...\n" << std::endl;
+        
+        // RAM compartida (512 palabras de 64 bits = 4KB)
+        auto shared_ram = std::make_shared<RAM>(true);
+        
+        // Interconnect (bus compartido)
+        auto interconnect = std::make_shared<Interconnect>(shared_ram, true);
+        
+        // Bus Controller para coherencia
+        auto bus_controller = std::make_shared<BusController>(true);
+        
+        std::cout << "RAM, Interconnect y BusController inicializados\n" << std::endl;
+        
+        // ========================================================
+        // 2. CARGAR VECTORES DESDE ARCHIVOS
+        // ========================================================
+            
+        printSeparator("Cargando Vectores desde Archivos");
+        waitForEnter(stepping_mode, "Preparándose para cargar vectores...");
             
         try {
             shared_ram->loadVectorsToMemory(
@@ -270,6 +436,7 @@ int main() {
         // ========================================================
                 
         printSeparator("EJECUTANDO LOS 4 PEs EN PARALELO");
+        waitForEnter(stepping_mode, "Preparándose para iniciar los PEs...");
 
         // Iniciar todos los PEs al mismo tiempo
         std::cout << "Iniciando los 4 PEs simultáneamente...\n" << std::endl;
@@ -293,9 +460,12 @@ int main() {
         // ========================================================
         
         printSeparator("RESULTADOS DE LOS PEs");
+        waitForEnter(stepping_mode, "Preparándose para mostrar resultados...");
         
         for (int i = 0; i < 4; i++) {
             std::cout << "\n=== PE" << i << " ===" << std::endl;
+            if (stepping_mode) {
+                waitForEnter(stepping_mode, "Mostrando resultados del PE" + std::to_string(i));
             
             // Leer suma parcial
             uint64_t partial_sum_raw;
@@ -341,12 +511,10 @@ int main() {
             std::cout << "  mem[" << i << "] = 0x" << std::hex 
                       << std::setw(16) << std::setfill('0') << value 
                       << std::dec;
+            double d;
+            std::memcpy(&d, &value, sizeof(double));
+            std::cout << " (" << std::fixed << std::setprecision(2) << d << ")";
             
-            if (i == 0 || i == 1 || i == 2) {
-                double d;
-                std::memcpy(&d, &value, sizeof(double));
-                std::cout << " (" << std::fixed << std::setprecision(2) << d << ")";
-            }
             std::cout << std::endl;
         }
         
@@ -355,6 +523,7 @@ int main() {
         // ========================================================
         
         printSeparator("RESUMEN FINAL DEL SISTEMA");
+        waitForEnter(stepping_mode, "Preparándose para mostrar el resumen final...");
         
         std::cout << "Sistema con 4 PEs:" << std::endl;
         
@@ -385,8 +554,6 @@ int main() {
         
         return 0;
         
-    } catch (const std::exception &ex) {
-        std::cerr << "\nError: " << ex.what() << "\n";
-        return 1;
-    }
+        
+}
 }

@@ -1,6 +1,7 @@
 // src/PE/PE.cpp
 #include <iostream>
 #include "PE.hpp"
+#include "../Clock/Clock.hpp"
 #include <cstring>
 #include <stdexcept>
 
@@ -76,12 +77,15 @@ static uint64_t doubleToUint64(double d) {
 }
 
 void PE::executeInstruction(const Instruction& inst, size_t &pc) {
+    auto& clock = Clock::getInstance();
+    
     switch (inst.op) {
         case OpCode::LOAD: {
             uint64_t addr = (inst.ra >= 0) ? regs_[inst.ra] : inst.imm;
             regs_[inst.rd] = mem_->load(addr);
             load_count_++;
             cycle_count_ += 1;
+            clock.tick();
             ++pc;
             break;
         }
