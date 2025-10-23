@@ -11,6 +11,7 @@
 #include <vector>
 #include <iomanip>
 #include <memory>
+#include <cmath>
 
 // ============================================================
 // ADAPTER: Convierte entre estructuras de Cache y Interconnect
@@ -482,6 +483,43 @@ int main(int argc, char* argv[]) {
                       << " | Ciclos: " << pes[i]->getCycleCount() << std::endl;
             
             caches[i]->printStats();
+        }
+
+
+        // VALIDACIÓN DEL PRODUCTO PUNTO FINAL
+        double total_sum = 0.0;
+        for (int i = 0; i < 4; i++) {
+            uint64_t partial_sum_raw;
+            caches[i]->read((24 + i) * sizeof(uint64_t), partial_sum_raw);
+            double partial_sum;
+            std::memcpy(&partial_sum, &partial_sum_raw, sizeof(double));
+            total_sum += partial_sum;
+        }
+
+        // Leer N directamente como entero
+        uint32_t N = static_cast<uint32_t>(shared_ram->read(0));
+
+        // Calcular producto punto directo desde RAM
+        double expected_dot = 0.0;
+        for (uint32_t i = 0; i < N; ++i) {
+            uint64_t a_raw = shared_ram->read(1 + i);     // Vector A en mem[1..12]
+            double a;
+            std::memcpy(&a, &a_raw, sizeof(double));
+
+            uint64_t b_raw = shared_ram->read(13 + i);    // Vector B en mem[13..24]
+            double b;
+            std::memcpy(&b, &b_raw, sizeof(double));
+
+            expected_dot += a * b;
+        }
+
+        std::cout << "\n=== VALIDACIÓN DEL PRODUCTO PUNTO FINAL ===\n";
+        std::cout << "  Suma de PEs     : " << std::fixed << std::setprecision(2) << total_sum << std::endl;
+        std::cout << "  Producto directo: " << std::fixed << std::setprecision(2) << expected_dot << std::endl;
+        if (std::fabs(total_sum - expected_dot) < 0.01) {
+            std::cout << "Valor correcto \n";
+        } else {
+            std::cout << "Valor incorrecto, diferencia: " << std::fabs(total_sum - expected_dot) << std::endl;
         }
         
         // ========================================================
