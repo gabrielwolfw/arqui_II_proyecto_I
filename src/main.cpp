@@ -185,7 +185,7 @@ std::atomic<bool> running(true);
 
 void clockControlThread(bool stepping_mode) {
     if (stepping_mode) {
-        std::cout << "🔄 Modo Stepping: Presione ENTER para avanzar cada ciclo" << std::endl;
+        std::cout << "Modo Stepping: Presione ENTER para avanzar cada ciclo" << std::endl;
         std::cout << "   (Escriba 'q' y ENTER para salir)\n" << std::endl;
         
         while (running) {
@@ -224,7 +224,7 @@ int main(int argc, char* argv[]) {
         printSeparator("SISTEMA INTEGRADO: 4 PEs + Cache + Interconnect + RAM");
         
         if (stepping_mode) {
-            std::cout << "🔄 Modo paso a paso por ciclos activado" << std::endl;
+            std::cout << "Modo paso a paso por ciclos activado" << std::endl;
             std::cout << "   Durante la ejecución solo se mostrarán los ciclos" << std::endl;
             std::cout << "   Al final se mostrarán todas las estadísticas\n" << std::endl;
         }
@@ -338,7 +338,7 @@ int main(int argc, char* argv[]) {
         }
 
         if (stepping_mode) {
-            std::cout << "\n✅ Todos los PEs han terminado su ejecución\n" << std::endl;
+            std::cout << "\nTodos los PEs han terminado su ejecución\n" << std::endl;
         } else {
             std::cout << "\nTodos los PEs han terminado su ejecución\n" << std::endl;
         }
@@ -401,9 +401,9 @@ int main(int argc, char* argv[]) {
         std::cout << "  Producto directo: " << std::fixed << std::setprecision(2) << expected_dot << std::endl;
         
         if (std::fabs(total_sum - expected_dot) < 0.01) {
-            std::cout << "  ✅ VALOR CORRECTO\n";
+            std::cout << "VALOR CORRECTO\n";
         } else {
-            std::cout << "  ❌ VALOR INCORRECTO, diferencia: " 
+            std::cout << "VALOR INCORRECTO, diferencia: " 
                       << std::fabs(total_sum - expected_dot) << std::endl;
         }
         
