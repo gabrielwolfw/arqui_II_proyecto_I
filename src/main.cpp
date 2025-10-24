@@ -5,6 +5,7 @@
 #include "ram/ram.hpp"
 #include "interconnect/interconnect.hpp"
 #include "bus/bus_controller.hpp"
+#include "Clock/Clock.hpp"
 #include <iostream>
 #include <cstring>
 #include <fstream>
@@ -12,9 +13,11 @@
 #include <iomanip>
 #include <memory>
 #include <cmath>
+#include <thread>
+#include <atomic>
 
 // ============================================================
-// ADAPTER: Convierte entre estructuras de Cache y Interconnect
+// ADAPTER
 // ============================================================
 
 BusTransactionType busEventToTransactionType(BusEvent event) {
@@ -31,7 +34,7 @@ BusTransactionType busEventToTransactionType(BusEvent event) {
 }
 
 // ============================================================
-// INTERFACE: Conecta Cache con Interconnect + RAM
+// INTERFACE
 // ============================================================
 
 class InterconnectBusInterface : public IBusInterface {
@@ -106,13 +109,8 @@ public:
         std::cout << "[PE" << pe_id << "] Sending bus message: " 
                   << transaction.toString() << std::endl;
         
-        // Agregar transacción al Interconnect
         interconnect->addRequest(transaction);
-        
-        // Enviar mensaje de broadcast directamente
         interconnect->broadcastBusMessage(msg);
-        
-        // Notificar al bus controller
         bus_controller->notifyTransaction(msg.address, msg.sender_pe_id);
     }
     
@@ -125,7 +123,7 @@ public:
 };
 
 // ============================================================
-// WRAPPER: PE accede a Cache
+// WRAPPER
 // ============================================================
 
 class CacheMemPort : public IMemPort {
@@ -183,22 +181,27 @@ void waitForEnter(bool stepping_mode, const std::string& message = "") {
 // MAIN
 // ============================================================
 
-#include "Clock/Clock.hpp"
-#include <thread>
-#include <atomic>
-
 std::atomic<bool> running(true);
 
 void clockControlThread(bool stepping_mode) {
     if (stepping_mode) {
-        std::cout << "Control de reloj: Presione ENTER para avanzar un ciclo, 'q' para salir" << std::endl;
+        std::cout << "🔄 Modo Stepping: Presione ENTER para avanzar cada ciclo" << std::endl;
+        std::cout << "   (Escriba 'q' y ENTER para salir)\n" << std::endl;
+        
         while (running) {
-            char input;
-            std::cin.get(input);
-            if (input == 'q' || input == 'Q') {
+            std::string line;
+            if (!std::getline(std::cin, line)) {
+                // EOF o error de lectura
                 running = false;
                 break;
             }
+            
+            if (!line.empty() && (line[0] == 'q' || line[0] == 'Q')) {
+                running = false;
+                break;
+            }
+            
+            // Avanzar un ciclo
             Clock::getInstance().step();
         }
     }
@@ -219,8 +222,11 @@ int main(int argc, char* argv[]) {
         Clock::getInstance().setSteppingMode(stepping_mode);
         
         printSeparator("SISTEMA INTEGRADO: 4 PEs + Cache + Interconnect + RAM");
+        
         if (stepping_mode) {
-            std::cout << "Modo paso a paso por ciclos activado.\n" << std::endl;
+            std::cout << "🔄 Modo paso a paso por ciclos activado" << std::endl;
+            std::cout << "   Durante la ejecución solo se mostrarán los ciclos" << std::endl;
+            std::cout << "   Al final se mostrarán todas las estadísticas\n" << std::endl;
         }
         
         // Iniciar thread de control del reloj
@@ -233,52 +239,42 @@ int main(int argc, char* argv[]) {
         // 1. CREAR INFRAESTRUCTURA COMPARTIDA
         // ========================================================
         
-        std::cout << "Inicializando componentes del sistema...\n" << std::endl;
+        if (!stepping_mode) {
+            std::cout << "Inicializando componentes del sistema...\n" << std::endl;
+        }
         
-        // RAM compartida (512 palabras de 64 bits = 4KB)
-        auto shared_ram = std::make_shared<RAM>(true);
+        auto shared_ram = std::make_shared<RAM>(!stepping_mode);  // verbose solo si no es stepping
+        auto interconnect = std::make_shared<Interconnect>(shared_ram, !stepping_mode);
+        auto bus_controller = std::make_shared<BusController>(!stepping_mode);
         
-        // Interconnect (bus compartido)
-        auto interconnect = std::make_shared<Interconnect>(shared_ram, true);
-        
-        // Bus Controller para coherencia
-        auto bus_controller = std::make_shared<BusController>(true);
-        
-        std::cout << "RAM, Interconnect y BusController inicializados\n" << std::endl;
+        if (!stepping_mode) {
+            std::cout << "RAM, Interconnect y BusController inicializados\n" << std::endl;
+        }
         
         // ========================================================
         // 2. CARGAR VECTORES DESDE ARCHIVOS
         // ========================================================
-            
-        printSeparator("Cargando Vectores desde Archivos");
-            
-        try {
-            shared_ram->loadVectorsToMemory(
-                "vectores/vector_a.txt", 
-                "vectores/vector_b.txt"
-            );
-        } catch (const std::exception& e) {
-            std::cerr << "Error cargando vectores desde archivos: " 
-                      << e.what() << std::endl;
-            throw;
+        
+        if (!stepping_mode) {
+            printSeparator("Cargando Vectores desde Archivos");
         }
+            
+        shared_ram->loadVectorsToMemory("vectores/vector_a.txt", "vectores/vector_b.txt");
 
         // ========================================================
         // 3. CONFIGURAR LOS 4 PEs CON SUS CACHÉS
         // ========================================================
         
-        // Crear loader
         Loader loader;
-        
-        // Arrays para almacenar los componentes
         std::vector<std::unique_ptr<Cache>> caches;
         std::vector<std::shared_ptr<InterconnectBusInterface>> bus_interfaces;
         std::vector<std::unique_ptr<CacheMemPort>> cache_ports;
         std::vector<std::unique_ptr<PE>> pes;
         
-        // Configurar los 4 PEs
         for (int i = 0; i < 4; i++) {
-            printSeparator("Configurando PE" + std::to_string(i));
+            if (!stepping_mode) {
+                printSeparator("Configurando PE" + std::to_string(i));
+            }
             
             caches.push_back(std::make_unique<Cache>(i));
             bus_interfaces.push_back(std::make_shared<InterconnectBusInterface>(
@@ -287,7 +283,6 @@ int main(int argc, char* argv[]) {
             
             caches[i]->setBusInterface(bus_interfaces[i].get());
             bus_controller->registerCache(caches[i].get());
-            
             cache_ports.push_back(std::make_unique<CacheMemPort>(*caches[i]));
             
             pes.push_back(std::make_unique<PE>(i));
@@ -295,180 +290,68 @@ int main(int argc, char* argv[]) {
             
             std::string program_file = "Programs/program" + std::to_string(i + 1) + ".txt";
             auto pe_program = loader.parseProgram(loadProgramFromFile(program_file));
-            pes[i]->loadProgram(pe_program);
             
-            std::cout << "PE" << i << " configurado correctamente" << std::endl;
-        }
-        
-        // ========================================================
-        // 4. EJECUTAR LOS 4 PEs
-        // ========================================================
-        
-        printSeparator("EJECUTANDO LOS 4 PEs");
-        
-        for (int i = 0; i < 4; i++) {
-            pes[i]->start();
-        }
-        
-        for (int i = 0; i < 4; i++) {
-            pes[i]->join();
-        }
-        
-        // ========================================================
-        // 5. RESULTADOS
-        // ========================================================
-        
-        printSeparator("RESULTADOS FINALES");
-        
-        for (int i = 0; i < 4; i++) {
-            std::cout << "\nPE" << i << " completado:" << std::endl;
-            std::cout << "Instrucciones: " << pes[i]->getInstructionCount() << std::endl;
-            std::cout << "Ciclos: " << pes[i]->getCycleCount() << std::endl;
-            caches[i]->printStats();
-        }
-
-        // Esperar y limpiar el thread del reloj
-        if (stepping_mode && clock_thread.joinable()) {
-            running = false;
-            clock_thread.join();
-        }
-
-        std::cout << "\nEjecución completada con éxito." << std::endl;
-        return 0;
-        
-    } catch (const std::exception &ex) {
-        std::cerr << "\nError: " << ex.what() << "\n";
-        return 1;
-    }
-
-        
-        // ========================================================
-        // 1. CREAR INFRAESTRUCTURA COMPARTIDA
-        // ========================================================
-        
-        std::cout << "Inicializando componentes del sistema...\n" << std::endl;
-        
-        // RAM compartida (512 palabras de 64 bits = 4KB)
-        auto shared_ram = std::make_shared<RAM>(true);
-        
-        // Interconnect (bus compartido)
-        auto interconnect = std::make_shared<Interconnect>(shared_ram, true);
-        
-        // Bus Controller para coherencia
-        auto bus_controller = std::make_shared<BusController>(true);
-        
-        std::cout << "RAM, Interconnect y BusController inicializados\n" << std::endl;
-        
-        // ========================================================
-        // 2. CARGAR VECTORES DESDE ARCHIVOS
-        // ========================================================
-            
-        printSeparator("Cargando Vectores desde Archivos");
-        waitForEnter(stepping_mode, "Preparándose para cargar vectores...");
-            
-        try {
-            shared_ram->loadVectorsToMemory(
-                "vectores/vector_a.txt", 
-                "vectores/vector_b.txt"
-            );
-            
-            
-        } catch (const std::exception& e) {
-            std::cerr << "Error cargando vectores desde archivos: " 
-                      << e.what() << std::endl;
-        }
-
-        // ========================================================
-        // 3. CONFIGURAR LOS 4 PEs CON SUS CACHÉS
-        // ========================================================
-        
-        // Crear loader
-        Loader loader;
-        
-        // Arrays para almacenar los componentes
-        std::vector<std::unique_ptr<Cache>> caches;
-        std::vector<std::shared_ptr<InterconnectBusInterface>> bus_interfaces;
-        std::vector<std::unique_ptr<CacheMemPort>> cache_ports;
-        std::vector<std::unique_ptr<PE>> pes;
-        
-        // Configurar los 4 PEs
-        for (int i = 0; i < 4; i++) {
-            printSeparator("Configurando PE" + std::to_string(i));
-            
-            // Crear y configurar caché
-            caches.push_back(std::make_unique<Cache>(i));
-            
-            // Crear y configurar interfaz de bus
-            bus_interfaces.push_back(std::make_shared<InterconnectBusInterface>(
-                interconnect, shared_ram, bus_controller, i
-            ));
-            
-            // Conectar caché con interfaz de bus y registrar en controlador
-            caches[i]->setBusInterface(bus_interfaces[i].get());
-            bus_controller->registerCache(caches[i].get());
-            
-            // Crear y configurar puerto de memoria
-            cache_ports.push_back(std::make_unique<CacheMemPort>(*caches[i]));
-            
-            // Crear y configurar PE
-            pes.push_back(std::make_unique<PE>(i));
-            pes[i]->attachMemory(cache_ports[i].get());
-            
-            // Cargar programa específico para este PE
-            std::string program_file = "Programs/program" + std::to_string(i + 1) + ".txt";
-            try {
-                auto pe_program = loader.parseProgram(loadProgramFromFile(program_file));
+            if (!stepping_mode) {
                 std::cout << "Cargando programa para PE" << i << ": " << program_file 
                          << " (" << pe_program.size() << " instrucciones)" << std::endl;
-                pes[i]->loadProgram(pe_program);
-            } catch (const std::exception& e) {
-                std::cerr << "Error cargando programa " << program_file << ": " 
-                         << e.what() << std::endl;
-                throw;
             }
             
-            std::cout << "PE" << i << " configurado correctamente" << std::endl;
+            pes[i]->loadProgram(pe_program);
+            
+            if (!stepping_mode) {
+                std::cout << "PE" << i << " configurado correctamente" << std::endl;
+            }
         }
         
-        std::cout << "\nTotal de cachés registradas: " << bus_controller->getCacheCount() << std::endl;
+        if (!stepping_mode) {
+            std::cout << "\nTotal de cachés registradas: " << bus_controller->getCacheCount() << std::endl;
+        }
         
         // ========================================================
         // 4. EJECUTAR LOS 4 PEs
         // ========================================================
-                
-        printSeparator("EJECUTANDO LOS 4 PEs EN PARALELO");
-        waitForEnter(stepping_mode, "Preparándose para iniciar los PEs...");
+        
+        if (stepping_mode) {
+            std::cout << "\n╔════════════════════════════════════════╗" << std::endl;
+            std::cout << "║   INICIANDO EJECUCIÓN (Stepping)       ║" << std::endl;
+            std::cout << "╚════════════════════════════════════════╝\n" << std::endl;
+        } else {
+            printSeparator("EJECUTANDO LOS 4 PEs EN PARALELO");
+        }
 
-        // Iniciar todos los PEs al mismo tiempo
-        std::cout << "Iniciando los 4 PEs simultáneamente...\n" << std::endl;
         for (int i = 0; i < 4; i++) {
             pes[i]->start();
-            std::cout << "PE" << i << " iniciado" << std::endl;
+            if (!stepping_mode) {
+                std::cout << "PE" << i << " iniciado" << std::endl;
+            }
         }
 
-        std::cout << "\nTodos los PEs están corriendo en paralelo..." << std::endl;
+        if (!stepping_mode) {
+            std::cout << "\nTodos los PEs están corriendo en paralelo..." << std::endl;
+        }
 
-        // Esperar a que todos terminen
         for (int i = 0; i < 4; i++) {
             pes[i]->join();
-            std::cout << "PE" << i << " completado" << std::endl;
+            if (!stepping_mode) {
+                std::cout << "PE" << i << " completado" << std::endl;
+            }
         }
 
-        std::cout << "\nTodos los PEs han terminado su ejecución\n" << std::endl;
+        if (stepping_mode) {
+            std::cout << "\n✅ Todos los PEs han terminado su ejecución\n" << std::endl;
+        } else {
+            std::cout << "\nTodos los PEs han terminado su ejecución\n" << std::endl;
+        }
         
         // ========================================================
-        // 5. RESULTADOS DE CADA PE
+        // 5. RESULTADOS DE CADA PE (SIEMPRE SE MUESTRAN)
         // ========================================================
         
         printSeparator("RESULTADOS DE LOS PEs");
-        waitForEnter(stepping_mode, "Preparándose para mostrar resultados...");
         
         for (int i = 0; i < 4; i++) {
             std::cout << "\n=== PE" << i << " ===" << std::endl;
-            if (stepping_mode) {
-                waitForEnter(stepping_mode, "Mostrando resultados del PE" + std::to_string(i));
             
-            // Leer suma parcial
             uint64_t partial_sum_raw;
             caches[i]->read((24 + i) * sizeof(uint64_t), partial_sum_raw);
             double partial_sum;
@@ -476,17 +359,19 @@ int main(int argc, char* argv[]) {
             
             std::cout << "Suma parcial PE" << i << " (mem[" << (24 + i) << "]) = " 
                       << std::fixed << std::setprecision(2) << partial_sum << std::endl;
-            std::cout << "Instrucciones (uint64): " << pes[i]->getInstructionCount() 
-                      << " | Instrucciones (int): " << pes[i]->getIntInstructionCount()
+            std::cout << "Instrucciones: " << pes[i]->getIntInstructionCount()
                       << " | LOAD: " << pes[i]->getLoadCount()
                       << " | STORE: " << pes[i]->getStoreCount()
                       << " | Ciclos: " << pes[i]->getCycleCount() << std::endl;
             
+            // SIEMPRE mostrar estadísticas de caché
             caches[i]->printStats();
         }
 
+        // ========================================================
+        // VALIDACIÓN DEL PRODUCTO PUNTO FINAL (SIEMPRE SE MUESTRA)
+        // ========================================================
 
-        // VALIDACIÓN DEL PRODUCTO PUNTO FINAL
         double total_sum = 0.0;
         for (int i = 0; i < 4; i++) {
             uint64_t partial_sum_raw;
@@ -496,17 +381,15 @@ int main(int argc, char* argv[]) {
             total_sum += partial_sum;
         }
 
-        // Leer N directamente como entero
         uint32_t N = static_cast<uint32_t>(shared_ram->read(0));
 
-        // Calcular producto punto directo desde RAM
         double expected_dot = 0.0;
         for (uint32_t i = 0; i < N; ++i) {
-            uint64_t a_raw = shared_ram->read(1 + i);     // Vector A en mem[1..12]
+            uint64_t a_raw = shared_ram->read(1 + i);
             double a;
             std::memcpy(&a, &a_raw, sizeof(double));
 
-            uint64_t b_raw = shared_ram->read(13 + i);    // Vector B en mem[13..24]
+            uint64_t b_raw = shared_ram->read(13 + i);
             double b;
             std::memcpy(&b, &b_raw, sizeof(double));
 
@@ -516,14 +399,16 @@ int main(int argc, char* argv[]) {
         std::cout << "\n=== VALIDACIÓN DEL PRODUCTO PUNTO FINAL ===\n";
         std::cout << "  Suma de PEs     : " << std::fixed << std::setprecision(2) << total_sum << std::endl;
         std::cout << "  Producto directo: " << std::fixed << std::setprecision(2) << expected_dot << std::endl;
+        
         if (std::fabs(total_sum - expected_dot) < 0.01) {
-            std::cout << "Valor correcto \n";
+            std::cout << "  ✅ VALOR CORRECTO\n";
         } else {
-            std::cout << "Valor incorrecto, diferencia: " << std::fabs(total_sum - expected_dot) << std::endl;
+            std::cout << "  ❌ VALOR INCORRECTO, diferencia: " 
+                      << std::fabs(total_sum - expected_dot) << std::endl;
         }
         
         // ========================================================
-        // 6. PROCESAR TRANSACCIONES PENDIENTES
+        // 6. PROCESAR TRANSACCIONES PENDIENTES (SIEMPRE SE MUESTRA)
         // ========================================================
         
         printSeparator("Procesando Transacciones del Interconnect");
@@ -538,30 +423,28 @@ int main(int argc, char* argv[]) {
         std::cout << "Transacciones procesadas: " << transactions_processed << std::endl;
         
         // ========================================================
-        // 7. ESTADO FINAL DE RAM
+        // 7. ESTADO FINAL DE RAM (SIEMPRE SE MUESTRA)
         // ========================================================
         
         printSeparator("Estado Final de RAM");
         
-        std::cout << "Contenido de RAM (primeras 10 posiciones):" << std::endl;
-        for (uint32_t i = 0; i < 10; i++) {
+        std::cout << "Contenido de RAM (primeras 30 posiciones):" << std::endl;
+        for (uint32_t i = 0; i < 30; i++) {
             uint64_t value = shared_ram->read(i);
-            std::cout << "  mem[" << i << "] = 0x" << std::hex 
+            std::cout << "  mem[" << std::setw(2) << i << "] = 0x" << std::hex 
                       << std::setw(16) << std::setfill('0') << value 
                       << std::dec;
             double d;
             std::memcpy(&d, &value, sizeof(double));
-            std::cout << " (" << std::fixed << std::setprecision(2) << d << ")";
-            
+            std::cout << " (" << std::fixed << std::setprecision(2) << std::setw(8) << d << ")";
             std::cout << std::endl;
         }
         
         // ========================================================
-        // 8. RESUMEN FINAL
+        // 8. RESUMEN FINAL (SIEMPRE SE MUESTRA)
         // ========================================================
         
         printSeparator("RESUMEN FINAL DEL SISTEMA");
-        waitForEnter(stepping_mode, "Preparándose para mostrar el resumen final...");
         
         std::cout << "Sistema con 4 PEs:" << std::endl;
         
@@ -574,8 +457,8 @@ int main(int argc, char* argv[]) {
             total_hit_rate += hit_rate;
             
             std::cout << "\nPE" << i << ":" << std::endl;
-            std::cout << "   Instrucciones ejecutadas (uint64): " << pes[i]->getInstructionCount() << std::endl;
-            std::cout << "   Instrucciones ejecutadas (int): " << pes[i]->getIntInstructionCount() << std::endl;
+            std::cout << "   Instrucciones ejecutadas: " << pes[i]->getIntInstructionCount() << std::endl;
+            std::cout << "   Ciclos: " << pes[i]->getCycleCount() << std::endl;
             std::cout << "   Cache Hit Rate: " << std::fixed << std::setprecision(1) 
                       << hit_rate << "%" << std::endl;
         }
@@ -589,9 +472,17 @@ int main(int argc, char* argv[]) {
         std::cout << "   Coherencia MESI mantenida" << std::endl;
         
         std::cout << "\nSistema completo con 4 PEs funcionando correctamente" << std::endl;
+
+        // Limpiar el thread del reloj
+        if (stepping_mode && clock_thread.joinable()) {
+            running = false;
+            clock_thread.join();
+        }
         
         return 0;
         
-        
-}
+    } catch (const std::exception &ex) {
+        std::cerr << "\nError: " << ex.what() << "\n";
+        return 1;
+    }
 }
